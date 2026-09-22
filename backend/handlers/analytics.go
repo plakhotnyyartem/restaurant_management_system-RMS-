@@ -510,20 +510,16 @@ type recommendation struct {
 
 var weekdayNames = []string{"", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"}
 
-// Recommendations — GET /api/admin/analytics/recommendations?days=30
-// Combines all analyses into a short list of concrete actions for the owner.
-func (h *AnalyticsHandler) Recommendations(c *gin.Context) {
-	days := periodDays(c)
+// recommendations combines all analyses into a short list of concrete actions.
+func (h *AnalyticsHandler) recommendations(ctx context.Context, days int) ([]recommendation, error) {
 	recs := []recommendation{}
 
-	menu, err := h.menuEngineering(c, days)
+	menu, err := h.menuEngineering(ctx, days)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build recommendations"})
-		return
+		return nil, err
 	}
 	if menu.TotalItems == 0 {
-		c.JSON(http.StatusOK, gin.H{"days": days, "items": recs, "generated_at": time.Now()})
-		return
+		return recs, nil
 	}
 
 	// 1. Puzzles with the highest margin → promote.
@@ -579,7 +575,7 @@ func (h *AnalyticsHandler) Recommendations(c *gin.Context) {
 	}
 
 	// 4. Strongest pair → combo offer.
-	if pairs, err := h.pairs(c, days, 1); err == nil && len(pairs) > 0 {
+	if pairs, err := h.pairs(ctx, days, 1); err == nil && len(pairs) > 0 {
 		p := pairs[0]
 		recs = append(recs, recommendation{
 			Type: "combo", Priority: 2,
@@ -591,7 +587,7 @@ func (h *AnalyticsHandler) Recommendations(c *gin.Context) {
 	}
 
 	// 5. Peak hour → staffing.
-	if cells, err := h.heatmap(c, days); err == nil && len(cells) > 0 {
+	if cells, err := h.heatmap(ctx, days); err == nil && len(cells) > 0 {
 		peak := cells[0]
 		for _, cell := range cells {
 			if cell.Orders > peak.Orders {
@@ -607,8 +603,8 @@ func (h *AnalyticsHandler) Recommendations(c *gin.Context) {
 	}
 
 	// 6. Trend compared with the previous period.
-	if cur, err := h.stats(c, days, 0); err == nil {
-		if prev, err := h.stats(c, days*2, days); err == nil && prev.Revenue > 0 {
+	if cur, err := h.stats(ctx, days, 0); err == nil {
+		if prev, err := h.stats(ctx, days*2, days); err == nil && prev.Revenue > 0 {
 			g := (cur.Revenue - prev.Revenue) / prev.Revenue * 100
 			title := fmt.Sprintf("Выручка растёт: +%.1f%%", g)
 			detail := "Рост к прошлому периоду — увеличить закупки ходовых продуктов, чтобы не было стоп-листа."
@@ -621,7 +617,7 @@ func (h *AnalyticsHandler) Recommendations(c *gin.Context) {
 	}
 
 	// 7. Forecast for tomorrow → what to prepare.
-	if fc, err := h.forecast(c, 8); err == nil && fc.Ready && len(fc.Forecast) >= 2 {
+	if fc, err := h.forecast(ctx, 8); err == nil && fc.Ready && len(fc.Forecast) >= 2 {
 		tomorrow := fc.Forecast[1]
 		var weekAvg float64
 		for _, p := range fc.Forecast[1:] {
@@ -652,5 +648,17 @@ func (h *AnalyticsHandler) Recommendations(c *gin.Context) {
 	}
 
 	sort.SliceStable(recs, func(i, j int) bool { return recs[i].Priority < recs[j].Priority })
+	return recs, nil
+}
+
+// Recommendations — GET /api/admin/analytics/recommendations?days=30
+// Combines all analyses into a short list of concrete actions for the owner.
+func (h *AnalyticsHandler) Recommendations(c *gin.Context) {
+	days := periodDays(c)
+	recs, err := h.recommendations(c, days)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build recommendations"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"days": days, "items": recs, "generated_at": time.Now()})
 }

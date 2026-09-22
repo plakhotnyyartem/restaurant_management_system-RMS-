@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -334,32 +335,26 @@ func (m lpModel) coverage(res lpResult) float64 {
 	return round2(planned / demand * 100)
 }
 
-// PurchasePlan — GET /api/admin/analytics/purchasing?budget=500000&safety=10
-func (h *InventoryHandler) PurchasePlan(c *gin.Context) {
-	safety := intQuery(c, "safety", 10, 0, 50)
-	budgetParam := float64(intQuery(c, "budget", 0, 0, 1_000_000_000))
+// buildPlan solves the purchasing LP. budgetParam = 0 means "enough for the whole forecast".
+func (h *InventoryHandler) buildPlan(ctx context.Context, budgetParam float64, safety int) (purchasePlan, error) {
 
-	ingredients, err := h.loadIngredients(c)
+	ingredients, err := h.loadIngredients(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load inventory"})
-		return
+		return purchasePlan{}, errors.New("failed to load inventory")
 	}
-	recipes, err := h.loadRecipes(c)
+	recipes, err := h.loadRecipes(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load recipes"})
-		return
+		return purchasePlan{}, errors.New("failed to load recipes")
 	}
-	_, forecastDishes, err := h.forecastDemand(c)
+	_, forecastDishes, err := h.forecastDemand(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build forecast"})
-		return
+		return purchasePlan{}, errors.New("failed to build forecast")
 	}
 
 	var prices = map[int]float64{}
-	rows, err := h.DB.Query(c, `SELECT id, price FROM dishes`)
+	rows, err := h.DB.Query(ctx, `SELECT id, price FROM dishes`)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load dishes"})
-		return
+		return purchasePlan{}, errors.New("failed to load dishes")
 	}
 	for rows.Next() {
 		var id int
@@ -415,8 +410,7 @@ func (h *InventoryHandler) PurchasePlan(c *gin.Context) {
 	}
 
 	if len(model.dishes) == 0 {
-		c.JSON(http.StatusOK, plan)
-		return
+		return plan, nil
 	}
 
 	// Budget that covers the whole forecast (rounded up to packs).
@@ -439,8 +433,7 @@ func (h *InventoryHandler) PurchasePlan(c *gin.Context) {
 
 	res, err := model.solve(budget)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "optimisation failed: " + err.Error()})
-		return
+		return purchasePlan{}, fmt.Errorf("optimisation failed: %w", err)
 	}
 	nd := len(model.dishes)
 	budgetRow := len(model.ingredients)
@@ -517,5 +510,17 @@ func (h *InventoryHandler) PurchasePlan(c *gin.Context) {
 		}
 	}
 
+	return plan, nil
+}
+
+// PurchasePlan — GET /api/admin/analytics/purchasing?budget=500000&safety=10
+func (h *InventoryHandler) PurchasePlan(c *gin.Context) {
+	plan, err := h.buildPlan(c,
+		float64(intQuery(c, "budget", 0, 0, 1_000_000_000)),
+		intQuery(c, "safety", 10, 0, 50))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, plan)
 }

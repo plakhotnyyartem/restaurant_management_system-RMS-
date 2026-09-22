@@ -46,6 +46,11 @@ func main() {
 		Analytics: analyticsHandler,
 	}
 
+	assistantHandler := &handlers.AssistantHandler{
+		Analytics: analyticsHandler,
+		Inventory: inventoryHandler,
+	}
+
 	router.GET("/api/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":   "ok",
@@ -95,6 +100,11 @@ func main() {
 	analytics.GET("/recommendations", analyticsHandler.Recommendations)
 	analytics.GET("/forecast", analyticsHandler.Forecast)
 	analytics.GET("/purchasing", inventoryHandler.PurchasePlan)
+
+	// AI assistant: explains the analytics above in plain language
+	assistant := protected.Group("/admin/assistant")
+	assistant.Use(handlers.RequireRole("admin", "owner"))
+	assistant.POST("", assistantHandler.Ask)
 
 	// Warehouse: the cook sees stock and receives deliveries, the owner watches it
 	inventory := protected.Group("/admin/inventory")

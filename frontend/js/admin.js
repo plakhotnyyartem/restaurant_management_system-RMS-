@@ -8,6 +8,7 @@ const main = document.getElementById("section");
 
 const SECTIONS = {
   dashboard: { icon: "📊", title: "Dashboard", roles: ["admin", "owner"] },
+  assistant: { icon: "🤖", title: "ИИ-ассистент", roles: ["admin", "owner"] },
   analytics: { icon: "🧠", title: "Аналитика", roles: ["admin", "owner"] },
   forecast: { icon: "🔮", title: "Прогноз", roles: ["admin", "owner"] },
   purchasing: { icon: "🛒", title: "Закупки", roles: ["admin", "owner"] },
@@ -578,6 +579,139 @@ async function renderInventory() {
   });
 }
 
+// ---------- ИИ-ассистент ----------
+
+const chatHistory = []; // [{ role: "user" | "assistant", content, tools? }]
+let chatBusy = false;
+
+const SUGGESTIONS = [
+  "Что прорекламировать на этой неделе?",
+  "Сколько заказов ждать в выходные и сколько поваров поставить?",
+  "Что закупить, если бюджет 300 000 ₸?",
+  "Напиши пост для Instagram про самое выгодное блюдо",
+  "Почему выручка упала по сравнению с прошлым месяцем?",
+  "Какое комбо предложить, чтобы вырос средний чек?",
+];
+
+// Ответ модели — это текст из внешнего сервиса: сначала экранируем,
+// потом превращаем только **жирный** и списки «- » в HTML.
+function renderAnswer(text) {
+  const blocks = esc(text).split(/\n{2,}/);
+  return blocks.map((block) => {
+    const lines = block.split("\n");
+    const bold = (line) => line.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    if (lines.every((l) => /^\s*[-•]\s+/.test(l))) {
+      return "<ul>" + lines.map((l) => "<li>" + bold(l.replace(/^\s*[-•]\s+/, "")) + "</li>").join("") + "</ul>";
+    }
+    return "<p>" + lines.map(bold).join("<br>") + "</p>";
+  }).join("");
+}
+
+function chatMessageHtml(m) {
+  if (m.role === "user") return `<div class="msg user">${esc(m.content)}</div>`;
+  const sources = m.tools?.length
+    ? `<div class="msg-sources">📊 Данные: ${m.tools.map((t) => `<span>${esc(t)}</span>`).join("")}</div>`
+    : "";
+  return `<div class="msg bot ${m.error ? "error" : ""}">${renderAnswer(m.content)}${sources}</div>`;
+}
+
+function renderChatLog() {
+  const log = document.getElementById("chat-log");
+  if (!log) return;
+  if (!chatHistory.length) {
+    log.innerHTML = `
+      <div class="chat-empty">
+        <div class="big">🤖</div>
+        <h3>Спросите о своём ресторане</h3>
+        <p>Ассистент сам заглянет в аналитику, прогноз и план закупок и объяснит цифры простыми словами.
+           Он не придумывает числа — берёт их из тех же расчётов, что и графики.</p>
+        <div class="suggestions">${SUGGESTIONS.map((q) => `<button class="chip" data-ask="${esc(q)}">${esc(q)}</button>`).join("")}</div>
+      </div>`;
+    return;
+  }
+  log.innerHTML = chatHistory.map(chatMessageHtml).join("") +
+    (chatBusy ? `<div class="msg bot"><span class="typing"><i></i><i></i><i></i></span>
+                 <span class="muted" style="font-size:13px;margin-left:8px">анализирую данные…</span></div>` : "");
+  log.scrollTop = log.scrollHeight;
+}
+
+async function askAssistant(question) {
+  question = question.trim();
+  if (!question || chatBusy) return;
+  chatHistory.push({ role: "user", content: question });
+  chatBusy = true;
+  renderChatLog();
+
+  try {
+    // На сервер уходят только тексты реплик (успешные ответы, без ошибок).
+    const messages = chatHistory
+      .filter((m) => !m.error)
+      .slice(-20)
+      .map((m) => ({ role: m.role, content: m.content }));
+    const result = await API.post("/admin/assistant", { messages });
+    chatHistory.push({ role: "assistant", content: result.reply || "…", tools: result.tools });
+  } catch (error) {
+    const text = error.status === 503
+      ? "Ассистент ещё не подключён: на сервере не задан ключ ANTHROPIC_API_KEY. Инструкция — в README, раздел «ИИ-ассистент»."
+      : error.status === 429
+        ? "Ассистент сейчас перегружен — попробуйте через минуту."
+        : "Не получилось получить ответ: " + error.message;
+    chatHistory.push({ role: "assistant", content: text, error: true });
+    // Вопрос остаётся в истории, но без ответа — убираем его из следующих запросов.
+    chatHistory[chatHistory.length - 2].error = true;
+  }
+  chatBusy = false;
+  renderChatLog();
+}
+
+async function renderAssistant() {
+  main.innerHTML = `
+    <div class="section-head" style="margin-bottom:16px">
+      <h2 style="margin:0">ИИ-ассистент</h2>
+      <button class="btn btn-ghost btn-sm" id="chat-clear">Новый диалог</button>
+    </div>
+    <div class="chat">
+      <div class="chat-log" id="chat-log"></div>
+      <form class="chat-form" id="chat-form">
+        <textarea class="input" id="chat-input" rows="1" maxlength="4000"
+          placeholder="Например: что будет с продажами в эти выходные?"></textarea>
+        <button class="btn" type="submit">Спросить</button>
+      </form>
+    </div>
+    <p class="muted" style="font-size:13px;margin-top:10px">
+      Модель Claude вызывает инструменты системы (KPI, инженерия меню, прогноз, закупки, анализ корзин, загрузка)
+      и объясняет результат. Enter — отправить, Shift+Enter — новая строка.
+    </p>`;
+
+  const input = document.getElementById("chat-input");
+  const send = () => {
+    const q = input.value;
+    input.value = "";
+    input.style.height = "";
+    askAssistant(q);
+  };
+  document.getElementById("chat-form").addEventListener("submit", (e) => { e.preventDefault(); send(); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  input.addEventListener("input", () => {
+    input.style.height = "";
+    input.style.height = Math.min(input.scrollHeight, 160) + "px";
+  });
+  document.getElementById("chat-log").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-ask]");
+    if (chip) askAssistant(chip.dataset.ask);
+  });
+  document.getElementById("chat-clear").addEventListener("click", () => {
+    if (chatBusy) return;
+    chatHistory.length = 0;
+    renderChatLog();
+  });
+
+  renderChatLog();
+  input.focus();
+}
+
 // ---------- Очередь заказов ----------
 
 let ordersFilter = "active";
@@ -864,6 +998,7 @@ main.addEventListener("click", async (e) => {
 const renderers = {
   dashboard: renderDashboard,
   analytics: renderAnalytics,
+  assistant: renderAssistant,
   forecast: renderForecast,
   purchasing: renderPurchasing,
   inventory: renderInventory,
