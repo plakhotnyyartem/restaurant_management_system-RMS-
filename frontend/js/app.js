@@ -290,6 +290,30 @@ const Cart = {
 
 // ---------- UI: шапка, футер, тосты, карточки ----------
 
+// Логотип RMS (тот же рисунок, что img/logo.svg), встроенный прямо в разметку:
+// значок красится акцентным цветом, буквы — currentColor, то есть цветом текста.
+const DROP_PATH = "M12.06 6.08 L0 30 L-12.06 6.08 A13.5 13.5 0 1 1 12.06 6.08Z";
+
+function logoSvg() {
+  const dot = (angle) => `<circle cx="0" cy="-33" r="13.5" transform="rotate(${angle})"/>`;
+  return `
+    <svg viewBox="0 0 275 100" aria-hidden="true" focusable="false">
+      <g class="logo-icon" transform="translate(50 50)">
+        ${dot(0)}
+        <path d="${DROP_PATH}" stroke-width="2" stroke-linejoin="round" transform="rotate(60) translate(0 -33)"/>
+        ${dot(120)}${dot(180)}${dot(240)}${dot(300)}
+      </g>
+      <g transform="translate(116 14) scale(1.1)">
+        <g fill="none" stroke="currentColor" stroke-width="10" stroke-linejoin="round">
+          <path d="M5 60 V35 A10 10 0 0 1 15 25 H26"/>
+          <path d="M39 60 V37 A12 12 0 0 1 63 37 V60 M63 37 A12 12 0 0 1 87 37 V60"/>
+          <path d="M133 25 H114.5 A7.5 7.5 0 0 0 114.5 40 H123.5 A7.5 7.5 0 0 1 123.5 55 H105"/>
+        </g>
+        <path d="${DROP_PATH}" fill="currentColor" transform="translate(130 5) rotate(35) scale(0.4)"/>
+      </g>
+    </svg>`;
+}
+
 const UI = {
   // Реестр отрисованных блюд, чтобы кнопка «В корзину» знала, что добавлять.
   dishIndex: new Map(),
@@ -312,9 +336,8 @@ const UI = {
     header.className = "site-header";
     header.innerHTML = `
       <div class="container header-inner">
-        <a href="index.html" class="logo">
-          <span class="logo-mark">🔥</span>
-          <span>Ember<b>.</b></span>
+        <a href="index.html" class="logo" aria-label="RMS — на главную">
+          ${logoSvg()}
         </a>
         <button class="burger" aria-label="Меню" aria-expanded="false">☰</button>
         <nav class="nav">
@@ -339,14 +362,14 @@ const UI = {
     footer.innerHTML = `
       <div class="container footer-inner">
         <div>
-          <a href="index.html" class="logo" style="margin-bottom:10px"><span class="logo-mark">🔥</span><span>Ember<b>.</b></span></a>
+          <a href="index.html" class="logo logo-lg" aria-label="RMS — на главную">${logoSvg()}</a>
           <p>Ресторан, в котором заказ идёт от вашего клика до кухни без бумажек.</p>
         </div>
         <div>
           <h4>Контакты</h4>
           <p>📍 Алматы, пр. Абая, 10</p>
           <p>📞 +7 (700) 000-00-00</p>
-          <p>✉️ hello@ember.kz</p>
+          <p>✉️ hello@rms.kz</p>
         </div>
         <div>
           <h4>Часы работы</h4>

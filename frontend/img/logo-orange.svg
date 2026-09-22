@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 275 100" role="img" aria-label="RMS">
+  <defs>
+    <!-- Капля: круглая «головка» в начале координат, острие смотрит вниз -->
+    <path id="drop" d="M12.06 6.08 L0 30 L-12.06 6.08 A13.5 13.5 0 1 1 12.06 6.08Z"/>
+  </defs>
+
+  <!-- Значок: 5 точек по кругу + капля, указывающая в центр -->
+  <g fill="#ff7a1a" transform="translate(50 50)">
+    <circle cx="0" cy="-33" r="13.5"/>
+    <use href="#drop" stroke="#ff7a1a" stroke-width="2" stroke-linejoin="round" transform="rotate(60) translate(0 -33)"/>
+    <circle cx="0" cy="-33" r="13.5" transform="rotate(120)"/>
+    <circle cx="0" cy="-33" r="13.5" transform="rotate(180)"/>
+    <circle cx="0" cy="-33" r="13.5" transform="rotate(240)"/>
+    <circle cx="0" cy="-33" r="13.5" transform="rotate(300)"/>
+  </g>
+
+  <!-- Надпись «rms»: геометрические буквы из линий одной толщины -->
+  <g transform="translate(116 14) scale(1.1)">
+    <g fill="none" stroke="#111" stroke-width="10" stroke-linejoin="round">
+      <path d="M5 60 V35 A10 10 0 0 1 15 25 H26"/>
+      <path d="M39 60 V37 A12 12 0 0 1 63 37 V60 M63 37 A12 12 0 0 1 87 37 V60"/>
+      <path d="M133 25 H114.5 A7.5 7.5 0 0 0 114.5 40 H123.5 A7.5 7.5 0 0 1 123.5 55 H105"/>
+    </g>
+    <!-- Акцент-капля над «s», как в образце -->
+    <use href="#drop" fill="#111" transform="translate(130 5) rotate(35) scale(0.4)"/>
+  </g>
+</svg>
