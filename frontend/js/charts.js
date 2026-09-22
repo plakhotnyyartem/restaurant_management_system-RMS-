@@ -169,12 +169,18 @@ function barChart(container, points, { valueKey, format, extraRows } = {}) {
 
 // ---------- Тепловая карта: день недели × час ----------
 
-// Один оттенок синего: чем больше заказов, тем светлее ячейка на тёмном фоне.
-const HEAT_RAMP = ["#123055", "#104281", "#1c5cab", "#2a78d6", "#5598e7", "#86b6ef", "#b7d3f6"];
+// Один оттенок синего. Малые значения «тонут» в фоне, большие — контрастны:
+// на тёмном фоне шкала идёт к светлому, на светлом — к тёмному.
+const HEAT_RAMP_DARK = ["#123055", "#104281", "#1c5cab", "#2a78d6", "#5598e7", "#86b6ef", "#b7d3f6"];
+const HEAT_RAMP_LIGHT = ["#dbe9f8", "#b7d3f6", "#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"];
+
+function heatRamp() {
+  return typeof Theme !== "undefined" && Theme.current() === "light" ? HEAT_RAMP_LIGHT : HEAT_RAMP_DARK;
+}
 
 function heatColor(t) {
-  const i = Math.min(HEAT_RAMP.length - 1, Math.floor(t * HEAT_RAMP.length));
-  return HEAT_RAMP[i];
+  const ramp = heatRamp();
+  return ramp[Math.min(ramp.length - 1, Math.floor(t * ramp.length))];
 }
 
 function heatmap(container, cells) {
@@ -239,7 +245,7 @@ function heatmap(container, cells) {
   high.textContent = "больше заказов";
   const bar = document.createElement("div");
   bar.className = "heat-legend-bar";
-  bar.style.background = `linear-gradient(90deg, ${HEAT_RAMP.join(", ")})`;
+  bar.style.background = `linear-gradient(90deg, ${heatRamp().join(", ")})`;
   legend.append(low, bar, high);
   container.appendChild(legend);
 }

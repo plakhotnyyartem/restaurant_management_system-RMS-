@@ -1024,6 +1024,11 @@ function route() {
   renderers[section]();
 }
 
+// После смены темы перерисовываем раздел: у тепловой карты своя шкала для каждой темы.
+window.addEventListener("themechange", () => {
+  if (role) route();
+});
+
 // Перерисовать графики при изменении ширины окна (SVG строится под ширину контейнера).
 let resizeTimer;
 window.addEventListener("resize", () => {

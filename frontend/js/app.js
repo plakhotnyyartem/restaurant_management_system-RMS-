@@ -340,11 +340,26 @@ const UI = {
         <a href="index.html" class="logo" aria-label="RMS — на главную">
           ${logoSvg()}
         </a>
-        <button class="burger" aria-label="Меню" aria-expanded="false">☰</button>
         <nav class="nav">
           ${links.map((l) => `<a href="${l.href}" class="${l.key === active ? "active" : ""}">${l.label}</a>`).join("")}
         </nav>
+        <div class="header-actions">
+          <button class="theme-toggle" type="button" aria-label="Переключить тему">
+            <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4.5"/>
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+            </svg>
+            <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/>
+            </svg>
+          </button>
+          <button class="burger" aria-label="Меню" aria-expanded="false">☰</button>
+        </div>
       </div>`;
+
+    header.querySelector(".theme-toggle").addEventListener("click", (event) => {
+      Theme.toggle(event.currentTarget);
+    });
 
     const burger = header.querySelector(".burger");
     const nav = header.querySelector(".nav");
@@ -453,8 +468,101 @@ document.addEventListener("click", (event) => {
   UI.toast(`${entry.dish.name} добавлен в корзину`, "success");
 });
 
+// ---------- Тема: светлая / тёмная ----------
+// Выбор хранится в localStorage (удобство одного пользователя). Если выбора нет —
+// тема берётся из настроек системы через CSS @media (prefers-color-scheme).
+// Атрибут data-theme ставится ещё в <head> каждой страницы, чтобы не было «вспышки».
+
+const Theme = {
+  current() {
+    const chosen = document.documentElement.dataset.theme;
+    if (chosen === "light" || chosen === "dark") return chosen;
+    return matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  },
+  apply(theme) {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem("rm_theme", theme); } catch {}
+    // Графики рисуются в SVG с цветами под тему — сообщаем, что их пора перерисовать.
+    window.dispatchEvent(new CustomEvent("themechange", { detail: theme }));
+  },
+  toggle(button) {
+    const next = this.current() === "dark" ? "light" : "dark";
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    // Новая тема «раскрывается» кругом из кнопки (View Transitions API).
+    if (document.startViewTransition && !reduce) {
+      const box = button.getBoundingClientRect();
+      const x = box.left + box.width / 2;
+      const y = box.top + box.height / 2;
+      const r = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+      const root = document.documentElement.style;
+      root.setProperty("--vt-x", x + "px");
+      root.setProperty("--vt-y", y + "px");
+      root.setProperty("--vt-r", r + "px");
+      document.startViewTransition(() => this.apply(next));
+      return;
+    }
+
+    // Запасной путь: плавный переход цветов.
+    document.documentElement.classList.add("theme-fade");
+    this.apply(next);
+    setTimeout(() => document.documentElement.classList.remove("theme-fade"), 400);
+  },
+};
+
+// ---------- Живые эффекты ----------
+
+// Секции с data-reveal плавно появляются, когда доходят до экрана.
+function initReveal() {
+  const items = document.querySelectorAll("[data-reveal]:not(.revealed)");
+  if (!("IntersectionObserver" in window)) {
+    items.forEach((el) => el.classList.add("revealed"));
+    return;
+  }
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      entry.target.classList.add("revealed");
+      entry.target.querySelectorAll("[data-count]").forEach(countUp);
+      observer.unobserve(entry.target);
+    }
+  }, { threshold: 0.15 });
+  items.forEach((el) => observer.observe(el));
+}
+
+// Число «набегает» от 0 до значения из data-count.
+function countUp(el) {
+  const target = Number(el.dataset.count);
+  const suffix = el.dataset.suffix || "";
+  const decimals = (el.dataset.count.split(".")[1] || "").length;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce) {
+    el.textContent = target.toFixed(decimals) + suffix;
+    return;
+  }
+  const start = performance.now();
+  const duration = 1200;
+  const step = (now) => {
+    const t = Math.min((now - start) / duration, 1);
+    const eased = 1 - Math.pow(1 - t, 3);
+    el.textContent = (target * eased).toFixed(decimals).replace(".", ",") + suffix;
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+// Подсветка карточки следует за курсором: координаты передаём в CSS-переменные.
+document.addEventListener("pointermove", (event) => {
+  const card = event.target.closest?.(".dish-card, .category-tile, .feature");
+  if (!card) return;
+  const box = card.getBoundingClientRect();
+  card.style.setProperty("--mx", event.clientX - box.left + "px");
+  card.style.setProperty("--my", event.clientY - box.top + "px");
+});
+
 // Общая инициализация страницы.
 function initPage(active) {
   UI.renderHeader(active);
   UI.renderFooter();
+  initReveal();
 }
