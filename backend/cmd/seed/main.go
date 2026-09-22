@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
+	"restaurant-management/config"
 	"restaurant-management/database"
 )
 
@@ -117,6 +118,7 @@ func main() {
 	flag.Parse()
 
 	ctx := context.Background()
+	must(config.Load())
 	db, err := database.Connect()
 	if err != nil {
 		log.Fatal(err)

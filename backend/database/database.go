@@ -5,10 +5,17 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"restaurant-management/config"
 )
 
+// Connect opens a connection pool using DATABASE_URL, e.g.
+// postgres://user:password@localhost:5432/restaurant_management
 func Connect() (*pgxpool.Pool, error) {
-	dsn := "postgres://postgres:postgres@localhost:5432/restaurant_management"
+	dsn, err := config.Required("DATABASE_URL")
+	if err != nil {
+		return nil, err
+	}
 
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
