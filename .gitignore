@@ -1,0 +1,9 @@
+# macOS
+.DS_Store
+
+# JetBrains IDEs
+.idea/
+
+# Go build output
+/backend/server
+*.exe
