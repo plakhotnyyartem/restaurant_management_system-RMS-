@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ember — ресторан</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-inner">
+        <div>
+          <span class="eyebrow">🔥 Готовим на живом огне</span>
+          <h1>Вкусно, быстро<br>и <span class="accent">без очередей</span></h1>
+          <p class="lead">Выберите блюдо, оформите заказ в пару кликов и следите за его статусом — от кухни до вашего стола.</p>
+          <div class="hero-actions">
+            <a href="menu.html" class="btn">Смотреть меню →</a>
+            <a href="#popular" class="btn btn-ghost">Популярное</a>
+          </div>
+          <div class="hero-stats">
+            <div><strong>40+</strong><span>блюд в меню</span></div>
+            <div><strong>15 мин</strong><span>среднее время готовки</span></div>
+            <div><strong>4.9 ★</strong><span>оценка гостей</span></div>
+          </div>
+        </div>
+        <div class="hero-plate" aria-hidden="true">
+          🍕
+          <span class="orbit o1">🍣</span>
+          <span class="orbit o2">🍔</span>
+          <span class="orbit o3">🍹</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <h2>Категории</h2>
+            <p>Выберите, с чего начать</p>
+          </div>
+        </div>
+        <div class="category-grid" id="categories"></div>
+      </div>
+    </section>
+
+    <section class="section" id="popular">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <h2>Популярные блюда</h2>
+            <p>То, что гости заказывают чаще всего</p>
+          </div>
+          <a href="menu.html" class="btn btn-ghost btn-sm">Всё меню →</a>
+        </div>
+        <div class="dish-grid" id="popular-dishes">
+          <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="section-head"><h2>Почему мы</h2></div>
+        <div class="features">
+          <div class="feature">
+            <div class="icon">⚡</div>
+            <h3>Быстрый заказ</h3>
+            <p>Корзина, оформление и оплата — без звонков и ожидания официанта.</p>
+          </div>
+          <div class="feature">
+            <div class="icon">📍</div>
+            <h3>Статус в реальном времени</h3>
+            <p>Видно, когда заказ принят, готовится и готов к выдаче.</p>
+          </div>
+          <div class="feature">
+            <div class="icon">🥬</div>
+            <h3>Свежие продукты</h3>
+            <p>Закупки каждый день — и скоро с умным прогнозом спроса.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+
+  <script src="js/app.js"></script>
+  <script>
+    initPage("home");
+
+    (async () => {
+      const [categories, dishes] = await Promise.all([Data.categories(), Data.dishes()]);
+
+      document.getElementById("categories").innerHTML = categories.map((c) => {
+        const count = dishes.filter((d) => d.category_id === c.id).length;
+        return `
+          <a class="category-tile" href="menu.html?cat=${c.id}">
+            <span class="emoji">${CATEGORY_EMOJI[c.name] || "🍽️"}</span>
+            <strong>${esc(c.name)}</strong>
+            <span>${count} ${plural(count, "блюдо", "блюда", "блюд")}</span>
+          </a>`;
+      }).join("");
+
+      // «Популярные» — пока просто первые доступные блюда.
+      // Позже здесь будет выборка из аналитики заказов (Big Data-модуль).
+      const popular = dishes.filter((d) => d.is_available).slice(0, 4);
+      document.getElementById("popular-dishes").innerHTML =
+        popular.map((d, i) => UI.dishCard(d, categories, i)).join("");
+    })();
+  </script>
+</body>
+</html>

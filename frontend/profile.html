@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Личный кабинет — Ember</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main class="container">
+    <div class="page-title"><h1>Личный кабинет</h1></div>
+    <div id="profile"></div>
+
+    <div class="section-head" style="margin-top:8px">
+      <h2>Мои заказы</h2>
+    </div>
+    <div id="orders"><div class="skeleton" style="height:140px"></div></div>
+  </main>
+
+  <footer id="site-footer"></footer>
+
+  <script src="js/app.js"></script>
+  <script>
+    const STATUS_FLOW = ["pending", "confirmed", "preparing", "ready", "completed"];
+    const STATUS_LABEL = {
+      pending: "Ожидает",
+      confirmed: "Принят",
+      preparing: "Готовится",
+      ready: "Готов к выдаче",
+      completed: "Выполнен",
+      cancelled: "Отменён",
+    };
+
+    async function loadProfile() {
+      const user = Auth.user();
+
+      document.getElementById("profile").innerHTML = `
+        <div class="profile-head">
+          <div class="avatar">${esc(user.name.charAt(0).toUpperCase())}</div>
+          <div class="who">
+            <h2>${esc(user.name)}</h2>
+            <div class="muted">${esc(user.email)}</div>
+            <span class="role-badge ${user.role === "admin" ? "admin" : ""}">${esc(user.role)}</span>
+          </div>
+          <button class="btn btn-ghost" id="logout">Выйти</button>
+        </div>`;
+
+      document.getElementById("logout").addEventListener("click", () => {
+        Auth.logout();
+        location.href = "index.html";
+      });
+
+      // Проверяем токен на сервере через защищённый GET /api/profile.
+      try {
+        await API.get("/profile");
+      } catch (error) {
+        if (error.status === 401) {
+          Auth.logout();
+          location.href = "login.html?next=profile.html";
+        }
+      }
+    }
+
+    function orderCard(order) {
+      const status = order.status || "pending";
+      const step = STATUS_FLOW.indexOf(status);
+      const items = (order.items || [])
+        .map((i) => `${esc(i.name || "Блюдо #" + i.dish_id)} ×${i.quantity}`)
+        .join(", ");
+      const date = order.created_at ? new Date(order.created_at).toLocaleString("ru-RU") : "";
+
+      return `
+        <div class="order-card">
+          <div class="order-top">
+            <div>
+              <strong>#${order.id}</strong>
+              <span class="muted" style="margin-left:10px;font-size:14px">${date}</span>
+            </div>
+            <span class="status ${status}">${STATUS_LABEL[status] || esc(status)}</span>
+          </div>
+          <div class="order-items">${items || "—"}</div>
+          ${status === "cancelled" ? "" : `
+            <div class="timeline">
+              ${STATUS_FLOW.map((_, i) => `<div class="${i <= step ? "done" : ""}"></div>`).join("")}
+            </div>
+            <div class="timeline-labels">
+              ${STATUS_FLOW.map((s) => `<span>${STATUS_LABEL[s]}</span>`).join("")}
+            </div>`}
+          <div style="text-align:right;margin-top:14px;font-weight:800;font-size:18px">
+            ${money(order.total_price ?? order.total ?? 0)}
+          </div>
+        </div>`;
+    }
+
+    async function loadOrders() {
+      const root = document.getElementById("orders");
+      try {
+        const orders = await API.get("/orders");
+        root.innerHTML = orders.length
+          ? orders.map(orderCard).join("")
+          : `<div class="empty"><div class="big">🧾</div><h3>Заказов пока нет</h3>
+               <a href="menu.html" class="btn">Сделать первый заказ</a></div>`;
+      } catch (error) {
+        root.innerHTML = API.isMissing(error)
+          ? `<div class="note"><span>🧪</span><span>История заказов появится, когда будет готов
+               <code>GET /api/orders</code> (RM-7). Статусы будут отображаться так:</span></div>
+             ${orderCard({ id: 1024, status: "preparing", total_price: 6400, items: [{ name: "Пепперони", quantity: 2 }] })}`
+          : `<div class="empty"><h3>Не удалось загрузить заказы</h3><p>${esc(error.message)}</p></div>`;
+      }
+    }
+
+    if (Auth.requireLogin()) {
+      initPage("profile");
+      loadProfile();
+      loadOrders();
+    }
+  </script>
+</body>
+</html>

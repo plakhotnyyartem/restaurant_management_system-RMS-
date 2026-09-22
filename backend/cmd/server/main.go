@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -23,9 +25,9 @@ func main() {
 		DB: db,
 	}
 
-    categoryHandler := &handlers.CategoryHandler{
-        DB: db,
-    }
+	categoryHandler := &handlers.CategoryHandler{
+		DB: db,
+	}
 
 	router.GET("/api/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -61,9 +63,33 @@ func main() {
 		})
 	})
 
+	// Everything that is not an API route is served from the frontend folder,
+	// so pages and API share one origin (no CORS needed).
+	frontend := http.FileServer(http.Dir(frontendDir()))
+	router.NoRoute(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "endpoint not found",
+			})
+			return
+		}
+		frontend.ServeHTTP(c.Writer, c.Request)
+	})
+
 	log.Println("Server started on http://localhost:8080")
 
 	if err := router.Run(":8080"); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// frontendDir finds the frontend folder whether the server is started
+// from the repository root or from the backend folder.
+func frontendDir() string {
+	for _, dir := range []string{"frontend", "../frontend"} {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return dir
+		}
+	}
+	return "../frontend"
 }

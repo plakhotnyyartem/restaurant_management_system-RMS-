@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Корзина — Ember</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main class="container">
+    <div class="page-title">
+      <h1>Корзина</h1>
+    </div>
+    <div id="cart"></div>
+  </main>
+
+  <footer id="site-footer"></footer>
+
+  <script src="js/app.js"></script>
+  <script>
+    initPage("cart");
+
+    const root = document.getElementById("cart");
+
+    function render() {
+      const items = Cart.items();
+
+      if (!items.length) {
+        root.innerHTML = `
+          <div class="empty" style="margin:24px 0 60px">
+            <div class="big">🛒</div>
+            <h3>Корзина пуста</h3>
+            <p>Добавьте что-нибудь вкусное из меню.</p>
+            <a href="menu.html" class="btn">Перейти в меню</a>
+          </div>`;
+        return;
+      }
+
+      root.innerHTML = `
+        <div class="cart-layout">
+          <div class="cart-list">
+            ${items.map((i) => `
+              <div class="cart-row">
+                <div class="thumb">${i.emoji || "🍽️"}</div>
+                <div>
+                  <div class="name">${esc(i.name)}</div>
+                  <div class="unit">${money(i.price)}</div>
+                </div>
+                <div class="qty">
+                  <button data-id="${i.id}" data-step="-1" aria-label="Меньше">−</button>
+                  <span>${i.quantity}</span>
+                  <button data-id="${i.id}" data-step="1" aria-label="Больше">+</button>
+                </div>
+                <div class="sum">${money(i.price * i.quantity)}</div>
+                <button class="icon-btn" data-remove="${i.id}" aria-label="Удалить">✕</button>
+              </div>`).join("")}
+          </div>
+
+          <aside class="summary">
+            <h3>Ваш заказ</h3>
+            <div class="summary-line"><span>Позиций</span><span>${Cart.count()}</span></div>
+            <div class="summary-line"><span>Доставка</span><span>Бесплатно</span></div>
+            <div class="summary-total"><span>Итого</span><span>${money(Cart.total())}</span></div>
+            <button class="btn btn-block" id="checkout">Оформить заказ</button>
+            ${Auth.isLoggedIn() ? "" : '<p class="muted" style="font-size:13px;margin-top:10px;text-align:center">Для оформления нужно войти</p>'}
+          </aside>
+        </div>`;
+    }
+
+    root.addEventListener("click", async (e) => {
+      const step = e.target.closest("[data-step]");
+      if (step) {
+        const id = Number(step.dataset.id);
+        const item = Cart.items().find((i) => i.id === id);
+        if (item) Cart.setQuantity(id, item.quantity + Number(step.dataset.step));
+        render();
+        return;
+      }
+
+      const remove = e.target.closest("[data-remove]");
+      if (remove) {
+        Cart.remove(Number(remove.dataset.remove));
+        render();
+        return;
+      }
+
+      if (e.target.id === "checkout") {
+        await checkout(e.target);
+      }
+    });
+
+    async function checkout(button) {
+      if (!Auth.requireLogin()) return;
+
+      button.disabled = true;
+      button.textContent = "Оформляем…";
+
+      // На сервер отправляем только id и количество —
+      // цену бэкенд должен брать из БД, а не доверять клиенту.
+      const body = {
+        items: Cart.items().map((i) => ({ dish_id: i.id, quantity: i.quantity })),
+      };
+
+      try {
+        const order = await API.post("/orders", body);
+        Cart.clear();
+        UI.toast(`Заказ #${order?.id ?? ""} оформлен!`, "success");
+        setTimeout(() => (location.href = "profile.html"), 900);
+      } catch (error) {
+        if (API.isMissing(error)) {
+          UI.toast("Orders API ещё в разработке (RM-7) — корзина сохранена", "error");
+        } else {
+          UI.toast("Не удалось оформить заказ: " + error.message, "error");
+        }
+        button.disabled = false;
+        button.textContent = "Оформить заказ";
+      }
+    }
+
+    render();
+  </script>
+</body>
+</html>
