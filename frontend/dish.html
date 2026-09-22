@@ -19,7 +19,7 @@
       <div class="section-head">
         <div>
           <h2>🔥 Возможно, вам понравится</h2>
-          <p>Часто заказывают вместе</p>
+          <p id="recommend-hint">Часто заказывают вместе</p>
         </div>
       </div>
       <div class="dish-grid" id="recommend"></div>
@@ -88,14 +88,28 @@
         UI.toast(`${dish.name} ×${quantity} — в корзине`, "success");
       });
 
-      // Простейшие «рекомендации»: доступные блюда из других категорий.
-      // Позже сюда подключится AI-модуль (пары «пицца + напиток» из истории заказов).
+      // «С этим берут»: ассоциативные правила из реальной истории заказов
+      // (GET /api/dishes/:id/pairs). Если данных нет — блюда из других категорий.
       try {
         const all = await Data.dishes();
-        const picks = all
-          .filter((d) => d.is_available && d.category_id !== dish.category_id)
-          .sort(() => Math.random() - 0.5)
-          .slice(0, 3);
+        let picks = [];
+        let reason = {};
+        try {
+          const pairs = await API.get(`/dishes/${dish.id}/pairs`);
+          for (const p of pairs) {
+            const found = all.find((d) => d.id === p.dish_id && d.is_available);
+            if (found) {
+              picks.push(found);
+              reason[found.id] = p.confidence;
+            }
+          }
+        } catch {}
+        if (!picks.length) {
+          picks = all.filter((d) => d.is_available && d.category_id !== dish.category_id).slice(0, 3);
+        } else {
+          document.getElementById("recommend-hint").textContent =
+            `${Math.round(reason[picks[0].id])}% гостей, заказавших «${dish.name}», берут и «${picks[0].name}»`;
+        }
         if (picks.length) {
           document.getElementById("recommend").innerHTML = picks.map((d, i) => UI.dishCard(d, categories, i)).join("");
           document.getElementById("recommend-section").hidden = false;

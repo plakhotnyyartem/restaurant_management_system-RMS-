@@ -91,8 +91,11 @@
             <div class="timeline-labels">
               ${STATUS_FLOW.map((s) => `<span>${STATUS_LABEL[s]}</span>`).join("")}
             </div>`}
-          <div style="text-align:right;margin-top:14px;font-weight:800;font-size:18px">
-            ${money(order.total_price ?? order.total ?? 0)}
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+            ${status === "pending" && order.id !== 1024
+              ? `<button class="btn btn-danger btn-sm" data-cancel="${order.id}">Отменить заказ</button>`
+              : "<span></span>"}
+            <strong style="font-size:18px">${money(order.total_price ?? order.total ?? 0)}</strong>
           </div>
         </div>`;
     }
@@ -113,6 +116,22 @@
           : `<div class="empty"><h3>Не удалось загрузить заказы</h3><p>${esc(error.message)}</p></div>`;
       }
     }
+
+    // Клиент может отменить заказ, пока его не принял официант.
+    document.getElementById("orders").addEventListener("click", async (e) => {
+      const button = e.target.closest("[data-cancel]");
+      if (!button || !confirm("Отменить заказ?")) return;
+      try {
+        await API.post(`/orders/${button.dataset.cancel}/cancel`);
+        UI.toast("Заказ отменён", "success");
+      } catch (error) {
+        UI.toast(error.status === 409 ? "Заказ уже принят — отменить нельзя" : error.message, "error");
+      }
+      loadOrders();
+    });
+
+    // Статус обновляется сам, пока открыт кабинет.
+    setInterval(() => Auth.isLoggedIn() && loadOrders(), 20000);
 
     if (Auth.requireLogin()) {
       initPage("profile");

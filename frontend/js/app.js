@@ -328,8 +328,9 @@ const UI = {
         ? { href: "profile.html", key: "profile", label: "👤 " + esc(user.name) }
         : { href: "login.html", key: "login", label: "Войти" },
     ];
-    if (user && user.role === "admin") {
-      links.push({ href: "admin.html", key: "admin", label: "Админка" });
+    const panelLabel = { admin: "Админка", owner: "Аналитика", waiter: "Заказы", cook: "Кухня" }[user?.role];
+    if (panelLabel) {
+      links.push({ href: "admin.html", key: "admin", label: panelLabel });
     }
 
     const header = document.getElementById("site-header");

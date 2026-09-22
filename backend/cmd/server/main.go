@@ -29,6 +29,18 @@ func main() {
 		DB: db,
 	}
 
+	dishHandler := &handlers.DishHandler{
+		DB: db,
+	}
+
+	orderHandler := &handlers.OrderHandler{
+		DB: db,
+	}
+
+	analyticsHandler := &handlers.AnalyticsHandler{
+		DB: db,
+	}
+
 	router.GET("/api/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":   "ok",
@@ -39,6 +51,9 @@ func main() {
 	router.POST("/api/auth/register", authHandler.Register)
 	router.POST("/api/auth/login", authHandler.Login)
 	router.GET("/api/categories", categoryHandler.GetCategories)
+	router.GET("/api/dishes", dishHandler.GetDishes)
+	router.GET("/api/dishes/:id", dishHandler.GetDish)
+	router.GET("/api/dishes/:id/pairs", analyticsHandler.DishPairs)
 
 	protected := router.Group("/api")
 	protected.Use(handlers.AuthMiddleware())
@@ -51,11 +66,40 @@ func main() {
 		})
 	})
 
+	// Customer orders
+	protected.POST("/orders", orderHandler.CreateOrder)
+	protected.GET("/orders", orderHandler.GetMyOrders)
+	protected.GET("/orders/:id", orderHandler.GetOrder)
+	protected.POST("/orders/:id/cancel", orderHandler.CancelMyOrder)
+
+	// Staff: order queue for waiters and cooks
+	// (which status each role may set is checked inside UpdateStatus)
+	staff := protected.Group("/admin")
+	staff.Use(handlers.RequireRole("admin", "waiter", "cook"))
+	staff.GET("/orders", orderHandler.GetAllOrders)
+	staff.PUT("/orders/:id/status", orderHandler.UpdateStatus)
+
+	// Analytics and decision support for the owner and admin
+	analytics := protected.Group("/admin/analytics")
+	analytics.Use(handlers.RequireRole("admin", "owner"))
+	analytics.GET("/summary", analyticsHandler.Summary)
+	analytics.GET("/sales", analyticsHandler.Sales)
+	analytics.GET("/heatmap", analyticsHandler.Heatmap)
+	analytics.GET("/menu", analyticsHandler.MenuEngineering)
+	analytics.GET("/pairs", analyticsHandler.Pairs)
+	analytics.GET("/recommendations", analyticsHandler.Recommendations)
+
 	admin := protected.Group("/admin")
 	admin.Use(handlers.RequireRole("admin"))
 	admin.POST("/categories", categoryHandler.CreateCategory)
 	admin.PUT("/categories/:id", categoryHandler.UpdateCategory)
 	admin.DELETE("/categories/:id", categoryHandler.DeleteCategory)
+
+	admin.GET("/dishes", dishHandler.GetAdminDishes)
+	admin.POST("/dishes", dishHandler.CreateDish)
+	admin.PUT("/dishes/:id", dishHandler.UpdateDish)
+	admin.PATCH("/dishes/:id/availability", dishHandler.SetAvailability)
+	admin.DELETE("/dishes/:id", dishHandler.DeleteDish)
 
 	admin.GET("/test", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
