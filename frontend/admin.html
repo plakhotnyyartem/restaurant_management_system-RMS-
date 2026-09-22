@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Админ-панель — Ember</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main class="container">
+    <div class="admin-layout" id="admin">
+      <nav class="admin-side">
+        <div class="side-title">ADMIN PANEL</div>
+        <a href="#dashboard" data-section="dashboard">📊 Dashboard</a>
+        <a href="#categories" data-section="categories">🗂️ Categories</a>
+        <a href="#dishes" data-section="dishes">🍕 Dishes</a>
+        <a href="#orders" data-section="orders">🧾 Orders</a>
+        <a href="#users" data-section="users">👥 Users</a>
+        <a href="#statistics" data-section="statistics">📈 Statistics</a>
+      </nav>
+      <section class="admin-main" id="section"></section>
+    </div>
+  </main>
+
+  <footer id="site-footer"></footer>
+
+  <script src="js/app.js"></script>
+  <script>
+    const main = document.getElementById("section");
+
+    function pending(title, ticket, endpoints) {
+      return `
+        <h2>${title}</h2>
+        <div class="note"><span>🚧</span><span>Раздел ждёт бэкенд (${ticket}):
+          ${endpoints.map((e) => `<code>${e}</code>`).join(" ")}</span></div>`;
+    }
+
+    // ---------- Разделы ----------
+
+    const sections = {
+      async dashboard() {
+        const [categories, dishes] = await Promise.all([Data.categories(), Data.dishes()]);
+        main.innerHTML = `
+          <h2>Dashboard</h2>
+          <div class="stats">
+            <div class="stat"><span>Категорий</span><strong>${categories.length}</strong><small>из PostgreSQL</small></div>
+            <div class="stat"><span>Блюд</span><strong>${dishes.length}</strong><small>${Data.demo ? "демо-данные" : "из PostgreSQL"}</small></div>
+            <div class="stat"><span>Заказов</span><strong>—</strong><small>после Orders API</small></div>
+            <div class="stat"><span>Выручка</span><strong>—</strong><small>после Orders API</small></div>
+          </div>
+          <div class="panel">
+            <h3>Жизненный цикл заказа</h3>
+            <div class="flow">
+              <span class="status pending">pending</span><span class="arrow">→</span>
+              <span class="status confirmed">confirmed</span><span class="arrow">→</span>
+              <span class="status preparing">preparing</span><span class="arrow">→</span>
+              <span class="status ready">ready</span><span class="arrow">→</span>
+              <span class="status completed">completed</span>
+            </div>
+            <p class="muted" style="margin-top:12px;font-size:14px">
+              Отмена возможна только из <b>pending</b> → <span class="status cancelled">cancelled</span>
+            </p>
+          </div>`;
+      },
+
+      // Полностью рабочий раздел — CRUD через /api/admin/categories.
+      async categories() {
+        Data.categoriesCache = null;
+        let categories;
+        try {
+          categories = await API.get("/categories");
+        } catch (error) {
+          main.innerHTML = `<h2>Categories</h2><div class="empty"><h3>Ошибка загрузки</h3><p>${esc(error.message)}</p></div>`;
+          return;
+        }
+
+        main.innerHTML = `
+          <h2>Categories</h2>
+          <div class="panel">
+            <h3>Новая категория</h3>
+            <form class="inline-form" id="create-form">
+              <input class="input" id="new-name" placeholder="Например: Десерты" maxlength="100" required>
+              <button class="btn" type="submit">+ Добавить</button>
+            </form>
+          </div>
+          <div class="panel table-wrap">
+            <table>
+              <thead><tr><th style="width:70px">ID</th><th>Название</th><th></th></tr></thead>
+              <tbody>
+                ${categories.map((c) => `
+                  <tr>
+                    <td class="muted">${c.id}</td>
+                    <td><input class="input" value="${esc(c.name)}" data-name="${c.id}" maxlength="100"></td>
+                    <td class="actions">
+                      <button class="btn btn-ghost btn-sm" data-save="${c.id}">Сохранить</button>
+                      <button class="btn btn-danger btn-sm" data-delete="${c.id}">Удалить</button>
+                    </td>
+                  </tr>`).join("") || '<tr><td colspan="3" class="muted">Категорий пока нет</td></tr>'}
+              </tbody>
+            </table>
+          </div>`;
+
+        document.getElementById("create-form").addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const input = document.getElementById("new-name");
+          try {
+            const created = await API.post("/admin/categories", { name: input.value });
+            UI.toast(`Категория «${created.name}» создана`, "success");
+            sections.categories();
+          } catch (error) {
+            UI.toast(adminError(error), "error");
+          }
+        });
+      },
+
+      async dishes() {
+        const [categories, dishes] = await Promise.all([Data.categories(), Data.dishes()]);
+        main.innerHTML = `
+          ${pending("Dishes", "RM-6", ["POST /api/admin/dishes", "PUT /api/admin/dishes/:id", "DELETE /api/admin/dishes/:id"])}
+          <div class="panel table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Блюдо</th><th>Категория</th><th>Цена</th><th>Статус</th></tr></thead>
+              <tbody>
+                ${dishes.map((d) => `
+                  <tr>
+                    <td class="muted">${d.id}</td>
+                    <td>${dishEmoji(d, categories)} ${esc(d.name)}</td>
+                    <td>${esc(categoryName(categories, d.category_id))}</td>
+                    <td>${money(d.price)}</td>
+                    <td>${d.is_available ? '<span class="status ready">в наличии</span>' : '<span class="status cancelled">скрыто</span>'}</td>
+                  </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>`;
+      },
+
+      async orders() {
+        main.innerHTML = pending("Orders", "RM-7", ["GET /api/admin/orders", "PUT /api/admin/orders/:id/status"]);
+      },
+
+      async users() {
+        main.innerHTML = pending("Users", "RM-10", ["GET /api/admin/users"]);
+      },
+
+      async statistics() {
+        main.innerHTML = `
+          ${pending("Statistics", "Big Data", ["GET /api/admin/stats"])}
+          <div class="panel">
+            <h3>Что здесь появится</h3>
+            <p class="muted">Популярность блюд, продажи по дням и месяцам, выручка, средний чек —
+              после того как в <code>orders</code> и <code>order_items</code> накопятся данные.</p>
+          </div>`;
+      },
+    };
+
+    function adminError(error) {
+      if (error.status === 403) return "Нет прав администратора";
+      if (error.message === "category already exists") return "Такая категория уже есть";
+      if (error.message === "category has dishes, remove or move them first") return "В категории есть блюда — сначала перенесите их";
+      return error.message;
+    }
+
+    // Сохранение и удаление категорий (делегирование на весь раздел).
+    main.addEventListener("click", async (e) => {
+      const saveId = e.target.dataset.save;
+      const deleteId = e.target.dataset.delete;
+
+      if (saveId) {
+        const name = main.querySelector(`[data-name="${saveId}"]`).value;
+        try {
+          await API.put("/admin/categories/" + saveId, { name });
+          UI.toast("Сохранено", "success");
+        } catch (error) {
+          UI.toast(adminError(error), "error");
+        }
+      }
+
+      if (deleteId) {
+        if (!confirm("Удалить категорию?")) return;
+        try {
+          await API.delete("/admin/categories/" + deleteId);
+          UI.toast("Категория удалена", "success");
+          sections.categories();
+        } catch (error) {
+          UI.toast(adminError(error), "error");
+        }
+      }
+    });
+
+    function route() {
+      const name = location.hash.slice(1) || "dashboard";
+      const section = sections[name] ? name : "dashboard";
+      document.querySelectorAll(".admin-side a").forEach((a) =>
+        a.classList.toggle("active", a.dataset.section === section));
+      main.innerHTML = '<div class="skeleton" style="height:200px"></div>';
+      sections[section]();
+    }
+
+    // Проверка роли на клиенте — только для удобства интерфейса.
+    // Настоящая защита — RequireRole("admin") на бэкенде (там клиент вернёт 403).
+    if (Auth.requireLogin()) {
+      initPage("admin");
+      if (!Auth.hasRole("admin")) {
+        document.getElementById("admin").innerHTML = `
+          <div class="empty" style="grid-column:1/-1">
+            <div class="big">🔒</div>
+            <h3>Доступ только для администраторов</h3>
+            <p>Ваша роль: ${esc(Auth.user().role)}</p>
+            <a href="index.html" class="btn">На главную</a>
+          </div>`;
+      } else {
+        window.addEventListener("hashchange", route);
+        route();
+      }
+    }
+  </script>
+</body>
+</html>

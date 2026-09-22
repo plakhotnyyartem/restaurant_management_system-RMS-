@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Блюдо — Ember</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main class="container">
+    <div id="dish"><div class="skeleton" style="margin-top:40px"></div></div>
+
+    <section class="section" id="recommend-section" hidden>
+      <div class="section-head">
+        <div>
+          <h2>🔥 Возможно, вам понравится</h2>
+          <p>Часто заказывают вместе</p>
+        </div>
+      </div>
+      <div class="dish-grid" id="recommend"></div>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+
+  <script src="js/app.js"></script>
+  <script>
+    initPage("menu");
+
+    let quantity = 1;
+
+    (async () => {
+      const root = document.getElementById("dish");
+      const [categories, dish] = await Promise.all([Data.categories(), Data.dish(qs("id"))]);
+
+      if (!dish) {
+        root.innerHTML = `
+          <div class="empty" style="margin:40px 0">
+            <div class="big">🍽️</div>
+            <h3>Блюдо не найдено</h3>
+            <a href="menu.html" class="btn">Вернуться в меню</a>
+          </div>`;
+        return;
+      }
+
+      const emoji = dishEmoji(dish, categories);
+      document.title = dish.name + " — Ember";
+
+      root.innerHTML = `
+        ${Data.demo ? `<div style="margin-top:24px">${UI.demoNote()}</div>` : ""}
+        <div class="dish-page">
+          <div class="dish-media">
+            ${dish.image_url ? `<img src="${esc(dish.image_url)}" alt="${esc(dish.name)}">` : `<span class="emoji">${emoji}</span>`}
+          </div>
+          <div class="dish-info">
+            <div class="cat">${esc(categoryName(categories, dish.category_id))}</div>
+            <h1>${esc(dish.name)}</h1>
+            <p class="desc">${esc(dish.description)}</p>
+            <span class="price">${money(dish.price)}</span>
+            <div class="buy-row">
+              <div class="qty">
+                <button data-step="-1" aria-label="Меньше">−</button>
+                <span id="qty">1</span>
+                <button data-step="1" aria-label="Больше">+</button>
+              </div>
+              <button class="btn" id="add" ${dish.is_available ? "" : "disabled"}>
+                ${dish.is_available ? "Добавить в корзину" : "Нет в наличии"}
+              </button>
+            </div>
+            <a href="menu.html?cat=${dish.category_id}" class="back-link">← Назад к категории</a>
+          </div>
+        </div>`;
+
+      root.querySelector(".qty").addEventListener("click", (e) => {
+        const step = Number(e.target.dataset.step);
+        if (!step) return;
+        quantity = Math.max(1, Math.min(20, quantity + step));
+        document.getElementById("qty").textContent = quantity;
+      });
+
+      document.getElementById("add").addEventListener("click", () => {
+        Cart.add(dish, emoji, quantity);
+        UI.toast(`${dish.name} ×${quantity} — в корзине`, "success");
+      });
+
+      // Простейшие «рекомендации»: доступные блюда из других категорий.
+      // Позже сюда подключится AI-модуль (пары «пицца + напиток» из истории заказов).
+      try {
+        const all = await Data.dishes();
+        const picks = all
+          .filter((d) => d.is_available && d.category_id !== dish.category_id)
+          .sort(() => Math.random() - 0.5)
+          .slice(0, 3);
+        if (picks.length) {
+          document.getElementById("recommend").innerHTML = picks.map((d, i) => UI.dishCard(d, categories, i)).join("");
+          document.getElementById("recommend-section").hidden = false;
+        }
+      } catch {}
+    })();
+  </script>
+</body>
+</html>
