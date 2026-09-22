@@ -27,6 +27,32 @@ func round2(v float64) float64 {
 	return math.Round(v*100) / 100
 }
 
+// tenge formats money the Russian way: 418408 → "418 408 ₸".
+func tenge(v float64) string {
+	digits := fmt.Sprintf("%.0f", math.Round(v))
+	var out []byte
+	for i := range digits {
+		if i > 0 && (len(digits)-i)%3 == 0 && digits[i-1] != '-' {
+			out = append(out, ' ')
+		}
+		out = append(out, digits[i])
+	}
+	return string(out) + " ₸"
+}
+
+// ordersWord picks the Russian plural form: 1 заказ, 3 заказа, 5 заказов.
+func ordersWord(n float64) string {
+	v := int(math.Round(math.Abs(n)))
+	switch {
+	case v%10 == 1 && v%100 != 11:
+		return "заказ"
+	case v%10 >= 2 && v%10 <= 4 && (v%100 < 12 || v%100 > 14):
+		return "заказа"
+	default:
+		return "заказов"
+	}
+}
+
 // growth returns the change in percent, or nil when there is nothing to compare with.
 func growth(current, previous float64) *float64 {
 	if previous == 0 {
@@ -326,8 +352,8 @@ func plowhorseAdvice(d menuDish, marginThreshold float64) string {
 	pct = math.Max(math.Ceil(pct), 3)
 	newPrice := math.Round(d.Price*(1+pct/100)/50) * 50 // round to 50 ₸
 	return fmt.Sprintf(
-		"Популярное, но маржа ниже средней: поднять цену на ~%.0f%% (до %.0f ₸) или снизить себестоимость (сейчас %.0f%% от цены).",
-		pct, newPrice, d.FoodCostPct,
+		"Популярное, но маржа ниже средней: поднять цену на ~%.0f%% (до %s) или снизить себестоимость (сейчас %.0f%% от цены).",
+		pct, tenge(newPrice), d.FoodCostPct,
 	)
 }
 
@@ -476,7 +502,7 @@ func (h *AnalyticsHandler) DishPairs(c *gin.Context) {
 // ---------- Recommendations: "what to do" ----------
 
 type recommendation struct {
-	Type     string `json:"type"`     // promote | price | remove | combo | staff | trend
+	Type     string `json:"type"`     // promote | price | remove | combo | staff | trend | forecast
 	Priority int    `json:"priority"` // 1 = most important
 	Title    string `json:"title"`
 	Detail   string `json:"detail"`
@@ -520,9 +546,9 @@ func (h *AnalyticsHandler) Recommendations(c *gin.Context) {
 		recs = append(recs, recommendation{
 			Type: "promote", Priority: 1,
 			Title: "Прорекламировать «" + d.Name + "»",
-			Detail: fmt.Sprintf("Маржа %.0f ₸ с порции — выше средней (%.0f ₸), но это лишь %.1f%% продаж. "+
+			Detail: fmt.Sprintf("Маржа %s с порции — выше средней (%s), но это лишь %.1f%% продаж. "+
 				"Скидка 10–15%% в будни или место в топе меню окупится за счёт маржи.",
-				d.UnitMargin, menu.MarginThreshold, d.Popularity),
+				tenge(d.UnitMargin), tenge(menu.MarginThreshold), d.Popularity),
 		})
 	}
 
@@ -547,8 +573,8 @@ func (h *AnalyticsHandler) Recommendations(c *gin.Context) {
 		recs = append(recs, recommendation{
 			Type: "remove", Priority: 3,
 			Title: "Под вопросом: «" + d.Name + "»",
-			Detail: fmt.Sprintf("Всего %.1f%% продаж и маржа %.0f ₸ (средняя %.0f ₸). %s",
-				d.Popularity, d.UnitMargin, menu.MarginThreshold, d.Advice),
+			Detail: fmt.Sprintf("Всего %.1f%% продаж и маржа %s (средняя %s). %s",
+				d.Popularity, tenge(d.UnitMargin), tenge(menu.MarginThreshold), d.Advice),
 		})
 	}
 
@@ -592,6 +618,37 @@ func (h *AnalyticsHandler) Recommendations(c *gin.Context) {
 			}
 			recs = append(recs, recommendation{Type: "trend", Priority: 1, Title: title, Detail: detail})
 		}
+	}
+
+	// 7. Forecast for tomorrow → what to prepare.
+	if fc, err := h.forecast(c, 8); err == nil && fc.Ready && len(fc.Forecast) >= 2 {
+		tomorrow := fc.Forecast[1]
+		var weekAvg float64
+		for _, p := range fc.Forecast[1:] {
+			weekAvg += p.Value
+		}
+		weekAvg /= float64(len(fc.Forecast) - 1)
+
+		detail := fmt.Sprintf("Интервал %.0f–%.0f %s, ожидаемая выручка ~%s.",
+			tomorrow.Low, tomorrow.High, ordersWord(tomorrow.High), tenge(tomorrow.Revenue))
+		if len(fc.Dishes) >= 3 {
+			detail += fmt.Sprintf(" Заготовить больше всего: %s (~%.0f порц.), %s (~%.0f), %s (~%.0f).",
+				fc.Dishes[0].Name, fc.Dishes[0].Tomorrow, fc.Dishes[1].Name, fc.Dishes[1].Tomorrow,
+				fc.Dishes[2].Name, fc.Dishes[2].Tomorrow)
+		}
+		diff := (tomorrow.Value - weekAvg) / weekAvg * 100
+		compare := "обычный день"
+		if diff >= 5 {
+			compare = fmt.Sprintf("на %.0f%% больше среднего дня недели", diff)
+		} else if diff <= -5 {
+			compare = fmt.Sprintf("на %.0f%% меньше среднего дня недели", -diff)
+		}
+		recs = append(recs, recommendation{
+			Type: "forecast", Priority: 1,
+			Title: fmt.Sprintf("Завтра (%s) ожидается ~%.0f %s — %s",
+				weekdayNames[tomorrow.Weekday], tomorrow.Value, ordersWord(tomorrow.Value), compare),
+			Detail: detail,
+		})
 	}
 
 	sort.SliceStable(recs, func(i, j int) bool { return recs[i].Priority < recs[j].Priority })

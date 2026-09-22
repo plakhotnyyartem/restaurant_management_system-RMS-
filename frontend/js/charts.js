@@ -349,3 +349,121 @@ function menuMatrix(container, report) {
     }
   }
 }
+
+// ---------- Прогноз: факт + прогноз с интервалом ----------
+
+function forecastChart(container, history, forecast) {
+  container.replaceChildren();
+  container.classList.add("chart");
+
+  const points = [
+    ...history.map((p) => ({ date: p.date, actual: p.value })),
+    ...forecast.map((p) => ({ date: p.date, value: p.value, low: p.low, high: p.high, revenue: p.revenue })),
+  ];
+
+  const width = Math.max(container.clientWidth, 320);
+  const height = 280;
+  const m = { top: 16, right: 16, bottom: 28, left: 44 };
+  const w = width - m.left - m.right;
+  const h = height - m.top - m.bottom;
+
+  const maxValue = Math.max(...points.map((p) => p.high ?? p.actual));
+  const ticks = niceTicks(maxValue);
+  const max = ticks[ticks.length - 1];
+  const x = (i) => m.left + (i / (points.length - 1)) * w;
+  const y = (v) => m.top + h - (v / max) * h;
+
+  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, width, height, role: "img" }, container);
+
+  for (const t of ticks) {
+    svgEl("line", { x1: m.left, x2: m.left + w, y1: y(t), y2: y(t), class: t === 0 ? "axis" : "grid" }, svg);
+    svgText(svg, m.left - 8, y(t) + 4, compactNumber(t), { class: "tick", "text-anchor": "end" });
+  }
+
+  const first = history.length; // индекс первого дня прогноза (сегодня)
+
+  // Коридор 80%-го интервала — заливка с низкой прозрачностью.
+  const band = points.slice(first).map((p, i) => [x(first + i), y(p.high)])
+    .concat(points.slice(first).map((p, i) => [x(first + i), y(p.low)]).reverse());
+  svgEl("path", { d: "M" + band.map((pt) => pt.join(",")).join(" L") + " Z", class: "fc-band" }, svg);
+
+  // «Сегодня»
+  svgEl("line", { x1: x(first), x2: x(first), y1: m.top, y2: m.top + h, class: "threshold" }, svg);
+  svgText(svg, x(first) + 6, m.top + 10, "сегодня", { class: "axis-title" });
+
+  // Линия факта соединяется с началом прогноза, чтобы не было разрыва.
+  const actualPath = history.map((p, i) => `${x(i)},${y(p.value)}`);
+  svgEl("path", { d: "M" + actualPath.join(" L"), class: "fc-actual" }, svg);
+  const fcPath = [`${x(first - 1)},${y(history[history.length - 1].value)}`]
+    .concat(forecast.map((p, i) => `${x(first + i)},${y(p.value)}`));
+  svgEl("path", { d: "M" + fcPath.join(" L"), class: "fc-line" }, svg);
+
+  // Подписи дат по оси X
+  const every = Math.ceil(points.length / 8);
+  points.forEach((p, i) => {
+    if (i % every === 0) {
+      const d = new Date(p.date + "T00:00:00");
+      svgText(svg, x(i), height - 8, d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" }).replace(".", ""), {
+        class: "tick", "text-anchor": "middle",
+      });
+    }
+  });
+
+  // Подпись зоны прогноза — в свободном верхнем углу, не поверх линий
+  svgText(svg, m.left + w, m.top + 10, "прогноз →", { class: "direct-label", "text-anchor": "end" });
+
+  // Перекрестие: вертикальная линия прилипает к ближайшему дню
+  const cross = svgEl("line", { y1: m.top, y2: m.top + h, class: "crosshair", visibility: "hidden" }, svg);
+  const dot = svgEl("circle", { r: 4, class: "dot-mark", visibility: "hidden" }, svg);
+  const hit = svgEl("rect", { x: m.left, y: m.top, width: w, height: h, class: "hit", tabindex: 0 }, svg);
+  const tooltip = createTooltip(container);
+
+  const showAt = (i, pos) => {
+    const p = points[i];
+    const value = p.actual ?? p.value;
+    cross.setAttribute("x1", x(i));
+    cross.setAttribute("x2", x(i));
+    cross.setAttribute("visibility", "visible");
+    dot.setAttribute("cx", x(i));
+    dot.setAttribute("cy", y(value));
+    dot.setAttribute("visibility", "visible");
+    const d = new Date(p.date + "T00:00:00");
+    const title = d.toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "long" });
+    const rows = p.actual !== undefined
+      ? [{ value: String(p.actual), label: "заказов (факт)" }]
+      : [
+          { value: "~" + p.value, label: "заказов (прогноз)" },
+          { value: `${p.low}–${p.high}`, label: "интервал 80%" },
+          { value: money(p.revenue), label: "выручка" },
+        ];
+    tooltip.show(pos.x, pos.y, title, rows);
+  };
+  const hide = () => {
+    cross.setAttribute("visibility", "hidden");
+    dot.setAttribute("visibility", "hidden");
+    tooltip.hide();
+  };
+
+  hit.addEventListener("pointermove", (event) => {
+    const pos = pointerIn(container, event);
+    const i = Math.round(((pos.x - m.left) / w) * (points.length - 1));
+    showAt(Math.max(0, Math.min(points.length - 1, i)), pos);
+  });
+  hit.addEventListener("pointerleave", hide);
+  hit.addEventListener("focus", () => showAt(first, { x: x(first), y: y(points[first].value) }));
+  hit.addEventListener("blur", hide);
+
+  // Легенда: два ряда + интервал (ключ — короткая линия, как сама отметка)
+  const legend = document.createElement("div");
+  legend.className = "chart-legend";
+  for (const [cls, text] of [["key-actual", "Факт"], ["key-forecast", "Прогноз"], ["key-band", "Интервал 80%"]]) {
+    const item = document.createElement("span");
+    const key = document.createElement("i");
+    key.className = cls;
+    const label = document.createElement("span");
+    label.textContent = text;
+    item.append(key, label);
+    legend.appendChild(item);
+  }
+  container.appendChild(legend);
+}

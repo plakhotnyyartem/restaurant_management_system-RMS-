@@ -9,6 +9,7 @@ const main = document.getElementById("section");
 const SECTIONS = {
   dashboard: { icon: "📊", title: "Dashboard", roles: ["admin", "owner"] },
   analytics: { icon: "🧠", title: "Аналитика", roles: ["admin", "owner"] },
+  forecast: { icon: "🔮", title: "Прогноз", roles: ["admin", "owner"] },
   orders: { icon: "🧾", title: "Заказы", roles: ["admin", "waiter", "cook"] },
   dishes: { icon: "🍕", title: "Блюда", roles: ["admin"] },
   categories: { icon: "🗂️", title: "Категории", roles: ["admin"] },
@@ -114,8 +115,8 @@ async function renderDashboard() {
 
 // ---------- Аналитика ----------
 
-const REC_ICONS = { promote: "📣", price: "💰", remove: "🗑️", combo: "🍱", staff: "👨‍🍳", trend: "📈" };
-const REC_TYPES = { promote: "Реклама", price: "Цена", remove: "Меню", combo: "Комбо", staff: "Персонал", trend: "Тренд" };
+const REC_ICONS = { promote: "📣", price: "💰", remove: "🗑️", combo: "🍱", staff: "👨‍🍳", trend: "📈", forecast: "🔮" };
+const REC_TYPES = { promote: "Реклама", price: "Цена", remove: "Меню", combo: "Комбо", staff: "Персонал", trend: "Тренд", forecast: "Прогноз" };
 
 function recCard(r, i = 0) {
   return `
@@ -258,6 +259,84 @@ async function loadAnalytics() {
     menuMatrix(document.getElementById("chart-menu"), menu);
     heatmap(document.getElementById("chart-heat"), heat);
   }
+}
+
+// ---------- Прогноз спроса ----------
+
+const WEEKDAYS = ["", "пн", "вт", "ср", "чт", "пт", "сб", "вс"];
+
+async function renderForecast() {
+  let fc;
+  try {
+    fc = await API.get("/admin/analytics/forecast?horizon=14");
+  } catch (error) {
+    main.innerHTML = "<h2>Прогноз спроса</h2>" + errorBlock("Не удалось построить прогноз", error);
+    return;
+  }
+  if (!fc.ready) {
+    main.innerHTML = `<h2>Прогноз спроса</h2><div class="empty"><div class="big">🔮</div><h3>Мало данных</h3><p>${esc(fc.message)}</p></div>`;
+    return;
+  }
+
+  const tomorrow = fc.forecast[1];
+  const week = fc.forecast.slice(1, 8);
+  const weekOrders = week.reduce((sum, p) => sum + p.value, 0);
+  const weekRevenue = week.reduce((sum, p) => sum + p.revenue, 0);
+  const bt = fc.backtest;
+  const peak = week.reduce((a, b) => (b.value > a.value ? b : a));
+
+  main.innerHTML = `
+    <h2>Прогноз спроса</h2>
+    <div class="stats">
+      <div class="stat"><span>Завтра, ${WEEKDAYS[tomorrow.weekday]}</span><strong>~${tomorrow.value}</strong>
+        <small>заказов · интервал ${tomorrow.low}–${tomorrow.high}</small></div>
+      <div class="stat"><span>Следующие 7 дней</span><strong>~${weekOrders.toLocaleString("ru-RU")}</strong>
+        <small>заказов · выручка ~${money(Math.round(weekRevenue / 1000) * 1000)}</small></div>
+      <div class="stat"><span>Пик недели</span><strong>${WEEKDAYS[peak.weekday]}, ~${peak.value}</strong>
+        <small>${new Date(peak.date + "T00:00:00").toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}</small></div>
+      <div class="stat"><span>Ошибка прогноза</span><strong>${bt.mape_model.toFixed(1).replace(".", ",")}%</strong>
+        <span class="delta ${bt.improvement > 0 ? "up" : "down"}">${bt.improvement > 0 ? "▲" : "▼"} на ${Math.abs(bt.improvement).toFixed(0)}% ${bt.improvement > 0 ? "точнее" : "хуже"} наивного (${bt.mape_naive.toFixed(1).replace(".", ",")}%)</span></div>
+    </div>
+
+    <div class="panel">
+      <h3>Заказы в день: факт и прогноз на 14 дней</h3>
+      <div id="chart-forecast"></div>
+    </div>
+
+    <div class="panel">
+      <h3>Сколько порций готовить</h3>
+      <p class="muted" style="font-size:14px;margin:-8px 0 14px">Та же модель для каждого блюда — основа для плана закупок.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Блюдо</th><th class="num">Завтра</th><th class="num">7 дней</th><th class="num">Прошлые 7 дней</th><th class="num">Изменение</th></tr></thead>
+          <tbody>
+            ${fc.dishes.map((d) => `
+              <tr>
+                <td><strong>${esc(d.name)}</strong><div class="muted" style="font-size:12px">${esc(d.category)}</div></td>
+                <td class="num">~${d.tomorrow}</td>
+                <td class="num"><strong>~${d.next_week}</strong></td>
+                <td class="num muted">${d.last_week}</td>
+                <td class="num">${d.last_week ? `<span class="delta ${d.change_pct >= 3 ? "up" : d.change_pct <= -3 ? "down" : "flat"}" style="margin:0">${d.change_pct > 0 ? "+" : ""}${Math.round(d.change_pct)}%</span>` : "—"}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Как это считается</h3>
+      <p class="muted" style="font-size:14px;line-height:1.7">
+        <b style="color:var(--text)">${esc(fc.method)}.</b>
+        Прогноз = <i>уровень</i> + <i>тренд</i> × дни + <i>поправка дня недели</i>.
+        Коэффициенты сглаживания подобраны перебором по сетке с минимизацией квадратичной ошибки:
+        α = ${fc.params.alpha}, β = ${fc.params.beta}, γ = ${fc.params.gamma}. Обучено на ${fc.trained_days} днях.<br>
+        <b style="color:var(--text)">Проверка:</b> 4 раза модель обучалась только на прошлом и прогнозировала следующую неделю.
+        Средняя ошибка ${bt.mape_model}% против ${bt.mape_naive}% у наивного прогноза «как в тот же день неделю назад».
+        Интервал 80% = прогноз ± 1,28 × RMSE (${bt.rmse} заказа).
+      </p>
+    </div>`;
+
+  forecastChart(document.getElementById("chart-forecast"), fc.history, fc.forecast);
 }
 
 // ---------- Очередь заказов ----------
@@ -546,6 +625,7 @@ main.addEventListener("click", async (e) => {
 const renderers = {
   dashboard: renderDashboard,
   analytics: renderAnalytics,
+  forecast: renderForecast,
   orders: renderOrders,
   dishes: renderDishes,
   categories: renderCategories,
@@ -574,6 +654,7 @@ window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
     if (location.hash === "#analytics") loadAnalytics();
+    if (location.hash === "#forecast") renderForecast();
   }, 250);
 });
 

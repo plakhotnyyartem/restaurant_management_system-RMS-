@@ -88,6 +88,7 @@ func main() {
 	analytics.GET("/menu", analyticsHandler.MenuEngineering)
 	analytics.GET("/pairs", analyticsHandler.Pairs)
 	analytics.GET("/recommendations", analyticsHandler.Recommendations)
+	analytics.GET("/forecast", analyticsHandler.Forecast)
 
 	admin := protected.Group("/admin")
 	admin.Use(handlers.RequireRole("admin"))
