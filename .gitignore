@@ -7,3 +7,8 @@
 # Go build output
 /backend/server
 *.exe
+
+# Secrets: local settings live in backend/.env (template: backend/.env.example)
+.env
+*.env
+!.env.example
