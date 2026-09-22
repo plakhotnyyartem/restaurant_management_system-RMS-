@@ -923,6 +923,27 @@ td.actions { display: flex; gap: 8px; justify-content: flex-end; }
 .ticket .meta { color: var(--muted); font-size: 13px; display: flex; justify-content: space-between; }
 .ticket .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* ---------- Склад ---------- */
+
+.stock-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.stock-badge.critical { color: var(--danger); }
+.stock-badge.low { color: var(--warning); }
+.stock-badge.ok { color: var(--success); }
+.stock-badge.unused { color: var(--muted); }
+.stock-input { width: 110px; padding: 6px 10px; text-align: right; }
+.warn { color: var(--warning); font-size: 12px; }
+.lp-formula {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.8;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow-x: auto;
+  white-space: pre;
+}
+
 /* ---------- Форма блюда ---------- */
 
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }

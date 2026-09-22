@@ -135,12 +135,22 @@ func main() {
 	userIDs, err := ensureCustomers(ctx, db, *customers)
 	must(err)
 
-	start := time.Now()
-	orders, items, revenue, err := generateOrders(ctx, db, rng, dishes, userIDs, *days, *rate, *growth)
-	must(err)
+	// Running the seed twice must not double the history.
+	var existing int
+	must(db.QueryRow(ctx,
+		`SELECT count(*) FROM orders WHERE user_id IN (SELECT id FROM users WHERE email LIKE '%' || $1)`,
+		seedEmailDomain).Scan(&existing))
+	if existing > 0 {
+		fmt.Printf("✓ Заказы уже сгенерированы (%d) — пропускаю. Пересоздать: -reset\n", existing)
+	} else {
+		start := time.Now()
+		orders, items, revenue, err := generateOrders(ctx, db, rng, dishes, userIDs, *days, *rate, *growth)
+		must(err)
+		fmt.Printf("✓ Сгенерировано за %s: %d заказов, %d позиций, выручка %.0f ₸\n",
+			time.Since(start).Round(time.Millisecond), orders, items, revenue)
+	}
 
-	fmt.Printf("✓ Сгенерировано за %s: %d заказов, %d позиций, выручка %.0f ₸\n",
-		time.Since(start).Round(time.Millisecond), orders, items, revenue)
+	must(ensureInventory(ctx, db, rng, dishes))
 }
 
 func must(err error) {
@@ -485,4 +495,159 @@ func insertOrders(ctx context.Context, db *pgxpool.Pool, orders []genOrder) (int
 	}
 
 	return len(orderRows), len(itemRows), revenue, tx.Commit(ctx)
+}
+
+// ---------- Warehouse: ingredients, recipes, stock ----------
+
+type ingredientSeed struct {
+	Name      string
+	Unit      string
+	Price     float64 // ₸ per unit
+	Pack      float64 // bought in multiples of this
+	ShelfLife int     // days
+}
+
+var ingredientSeeds = []ingredientSeed{
+	{"Мука", "кг", 350, 10, 180},
+	{"Томатный соус", "кг", 1200, 1, 30},
+	{"Моцарелла", "кг", 4200, 1, 14},
+	{"Колбаса пепперони", "кг", 6500, 0.5, 30},
+	{"Пармезан", "кг", 9000, 0.5, 60},
+	{"Горгонзола", "кг", 11000, 0.5, 21},
+	{"Чеддер", "кг", 5200, 1, 30},
+	{"Куриное филе", "кг", 2600, 1, 3},
+	{"Бекон", "кг", 5500, 0.5, 14},
+	{"Соус барбекю", "кг", 1500, 1, 60},
+	{"Томаты", "кг", 1100, 1, 5},
+	{"Лосось", "кг", 9500, 1, 3},
+	{"Угорь", "кг", 14000, 0.5, 30},
+	{"Крабовое мясо", "кг", 6000, 0.5, 5},
+	{"Икра масаго", "кг", 12000, 0.5, 30},
+	{"Рис для суши", "кг", 900, 5, 365},
+	{"Нори", "шт", 45, 50, 365},
+	{"Сливочный сыр", "кг", 4500, 1, 21},
+	{"Авокадо", "шт", 350, 10, 5},
+	{"Огурцы", "кг", 900, 1, 7},
+	{"Говяжий фарш", "кг", 3800, 1, 3},
+	{"Булочки для бургеров", "шт", 90, 24, 3},
+	{"Фирменный соус", "кг", 1500, 1, 30},
+	{"Картофель фри (замор.)", "кг", 900, 2.5, 180},
+	{"Салат романо", "кг", 2200, 1, 4},
+	{"Фета", "кг", 5000, 1, 21},
+	{"Маслины", "кг", 4000, 1, 90},
+	{"Сахар", "кг", 500, 5, 365},
+	{"Маскарпоне", "кг", 6000, 0.5, 14},
+	{"Савоярди", "кг", 3000, 1, 90},
+	{"Кофе в зёрнах", "кг", 12000, 1, 90},
+	{"Молоко", "л", 550, 1, 7},
+	{"Кока-кола 0,5", "шт", 150, 24, 180},
+	{"Лайм", "кг", 1800, 1, 14},
+	{"Мята", "кг", 4000, 0.2, 5},
+	{"Содовая", "л", 300, 6, 180},
+	{"Пюре манго", "кг", 2500, 1, 30},
+}
+
+// Recipes: portion of every ingredient per dish (in the ingredient's unit).
+// Costs roughly match the dishes' cost_price in the menu above.
+var recipeSeeds = map[string]map[string]float64{
+	"Пепперони":     {"Мука": 0.25, "Томатный соус": 0.08, "Моцарелла": 0.15, "Колбаса пепперони": 0.04},
+	"Маргарита":     {"Мука": 0.25, "Томатный соус": 0.08, "Моцарелла": 0.12, "Томаты": 0.03},
+	"Четыре сыра":   {"Мука": 0.25, "Моцарелла": 0.1, "Горгонзола": 0.04, "Пармезан": 0.02, "Чеддер": 0.03},
+	"Барбекю":       {"Мука": 0.25, "Соус барбекю": 0.06, "Моцарелла": 0.12, "Куриное филе": 0.12, "Бекон": 0.06},
+	"Филадельфия":   {"Рис для суши": 0.15, "Нори": 1, "Лосось": 0.1, "Сливочный сыр": 0.08, "Огурцы": 0.03},
+	"Калифорния":    {"Рис для суши": 0.15, "Нори": 1, "Крабовое мясо": 0.1, "Авокадо": 0.5, "Огурцы": 0.03, "Сливочный сыр": 0.05, "Икра масаго": 0.03},
+	"Дракон":        {"Рис для суши": 0.15, "Нори": 1, "Угорь": 0.05, "Авокадо": 0.5, "Сливочный сыр": 0.05},
+	"Ролл с угрём":  {"Рис для суши": 0.15, "Нори": 1, "Угорь": 0.1, "Сливочный сыр": 0.1, "Чеддер": 0.05},
+	"Чизбургер":     {"Булочки для бургеров": 1, "Говяжий фарш": 0.25, "Чеддер": 0.04, "Фирменный соус": 0.04, "Огурцы": 0.03, "Томаты": 0.04},
+	"Бургер BBQ":    {"Булочки для бургеров": 1, "Говяжий фарш": 0.3, "Бекон": 0.04, "Соус барбекю": 0.05},
+	"Наггетсы":      {"Куриное филе": 0.25, "Мука": 0.05, "Фирменный соус": 0.05},
+	"Картофель фри": {"Картофель фри (замор.)": 0.2, "Фирменный соус": 0.03},
+	"Цезарь":        {"Салат романо": 0.12, "Куриное филе": 0.1, "Пармезан": 0.02, "Булочки для бургеров": 0.5},
+	"Греческий":     {"Томаты": 0.12, "Огурцы": 0.1, "Фета": 0.06, "Маслины": 0.03},
+	"Чизкейк":       {"Сливочный сыр": 0.08, "Сахар": 0.03, "Мука": 0.02},
+	"Тирамису":      {"Маскарпоне": 0.06, "Савоярди": 0.03, "Кофе в зёрнах": 0.005},
+	"Кока-кола":     {"Кока-кола 0,5": 1},
+	"Мохито":        {"Лайм": 0.03, "Мята": 0.01, "Сахар": 0.02, "Содовая": 0.3},
+	"Лимонад манго": {"Пюре манго": 0.12, "Сахар": 0.02, "Содовая": 0.3},
+	"Капучино":      {"Кофе в зёрнах": 0.01, "Молоко": 0.15},
+}
+
+// ensureInventory creates ingredients and recipes and fills an initial stock.
+// Existing stock is kept, so a re-run never overwrites a real stocktaking.
+func ensureInventory(ctx context.Context, db *pgxpool.Pool, rng *rand.Rand, dishes map[string]dishInfo) error {
+	ids := map[string]int{}
+	for _, ing := range ingredientSeeds {
+		var id int
+		err := db.QueryRow(ctx,
+			`INSERT INTO ingredients (name, unit, price, pack_size, shelf_life_days) VALUES ($1, $2, $3, $4, $5)
+			 ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+			 RETURNING id`,
+			ing.Name, ing.Unit, ing.Price, ing.Pack, ing.ShelfLife).Scan(&id)
+		if err != nil {
+			return fmt.Errorf("ingredient %s: %w", ing.Name, err)
+		}
+		ids[ing.Name] = id
+	}
+
+	// Iterate over the menu slice, not the map, so the result is deterministic.
+	recipes := 0
+	for _, m := range menu {
+		for name, qty := range recipeSeeds[m.Name] {
+			tag, err := db.Exec(ctx,
+				`INSERT INTO recipe_items (dish_id, ingredient_id, quantity) VALUES ($1, $2, $3)
+				 ON CONFLICT DO NOTHING`,
+				dishes[m.Name].ID, ids[name], qty)
+			if err != nil {
+				return fmt.Errorf("recipe %s / %s: %w", m.Name, name, err)
+			}
+			recipes += int(tag.RowsAffected())
+		}
+	}
+
+	// Initial stock: 15–90% of what the last 7 days consumed, so the warehouse
+	// has both comfortable positions and ones that are about to run out.
+	rows, err := db.Query(ctx,
+		`SELECT i.id, COALESCE(u.week, 0)
+		 FROM ingredients i
+		 LEFT JOIN (
+		     SELECT ri.ingredient_id, sum(ri.quantity * oi.quantity) AS week
+		     FROM order_items oi
+		     JOIN orders o ON o.id = oi.order_id
+		     JOIN recipe_items ri ON ri.dish_id = oi.dish_id
+		     WHERE o.status <> 'cancelled' AND o.created_at >= current_date - 7
+		     GROUP BY ri.ingredient_id
+		 ) AS u ON u.ingredient_id = i.id
+		 ORDER BY i.id`)
+	if err != nil {
+		return err
+	}
+	type usage struct {
+		id   int
+		week float64
+	}
+	var usages []usage
+	for rows.Next() {
+		var u usage
+		if err := rows.Scan(&u.id, &u.week); err != nil {
+			rows.Close()
+			return err
+		}
+		usages = append(usages, u)
+	}
+	rows.Close()
+
+	stocked := 0
+	for _, u := range usages {
+		qty := math.Round(u.week*(0.15+0.75*rng.Float64())*100) / 100
+		tag, err := db.Exec(ctx,
+			`INSERT INTO stock (ingredient_id, quantity) VALUES ($1, $2) ON CONFLICT DO NOTHING`, u.id, qty)
+		if err != nil {
+			return err
+		}
+		stocked += int(tag.RowsAffected())
+	}
+
+	fmt.Printf("✓ Склад: %d продуктов, новых строк техкарт: %d, начальных остатков: %d\n",
+		len(ids), recipes, stocked)
+	return nil
 }

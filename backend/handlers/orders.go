@@ -370,8 +370,15 @@ func (h *OrderHandler) UpdateStatus(c *gin.Context) {
 		return
 	}
 
+	tx, err := h.DB.Begin(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update order"})
+		return
+	}
+	defer tx.Rollback(c)
+
 	// "AND status = $3" protects against two employees changing the order at once.
-	tag, err := h.DB.Exec(c,
+	tag, err := tx.Exec(c,
 		`UPDATE orders SET status = $1 WHERE id = $2 AND status = $3`,
 		req.Status, id, current,
 	)
@@ -381,6 +388,33 @@ func (h *OrderHandler) UpdateStatus(c *gin.Context) {
 	}
 	if tag.RowsAffected() == 0 {
 		c.JSON(http.StatusConflict, gin.H{"error": "order was changed by someone else, reload it"})
+		return
+	}
+
+	// The cook starts cooking → ingredients leave the warehouse (by the recipes).
+	// Stock never goes below zero: a missing stocktaking should not block the kitchen.
+	if req.Status == "preparing" {
+		_, err = tx.Exec(c,
+			`UPDATE stock s
+			 SET quantity = GREATEST(s.quantity - used.qty, 0), updated_at = CURRENT_TIMESTAMP
+			 FROM (
+			     SELECT ri.ingredient_id, sum(ri.quantity * oi.quantity) AS qty
+			     FROM order_items oi
+			     JOIN recipe_items ri ON ri.dish_id = oi.dish_id
+			     WHERE oi.order_id = $1
+			     GROUP BY ri.ingredient_id
+			 ) AS used
+			 WHERE s.ingredient_id = used.ingredient_id`,
+			id,
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write off ingredients"})
+			return
+		}
+	}
+
+	if err := tx.Commit(c); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update order"})
 		return
 	}
 

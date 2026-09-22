@@ -467,3 +467,60 @@ function forecastChart(container, history, forecast) {
   }
   container.appendChild(legend);
 }
+
+// ---------- Кривая «бюджет → прибыль» ----------
+
+function budgetCurveChart(container, curve, current) {
+  container.replaceChildren();
+  container.classList.add("chart");
+
+  const width = Math.max(container.clientWidth, 300);
+  const height = 240;
+  const m = { top: 16, right: 20, bottom: 34, left: 56 };
+  const w = width - m.left - m.right;
+  const h = height - m.top - m.bottom;
+
+  const maxBudget = Math.max(...curve.map((p) => p.budget), current, 1);
+  const ticks = niceTicks(Math.max(...curve.map((p) => p.profit)));
+  const maxProfit = ticks[ticks.length - 1];
+  const x = (v) => m.left + (v / maxBudget) * w;
+  const y = (v) => m.top + h - (v / maxProfit) * h;
+
+  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, width, height, role: "img" }, container);
+  for (const t of ticks) {
+    svgEl("line", { x1: m.left, x2: m.left + w, y1: y(t), y2: y(t), class: t === 0 ? "axis" : "grid" }, svg);
+    svgText(svg, m.left - 8, y(t) + 4, compactNumber(t), { class: "tick", "text-anchor": "end" });
+  }
+  for (const p of curve) {
+    svgText(svg, x(p.budget), m.top + h + 16, compactNumber(p.budget), { class: "tick", "text-anchor": "middle" });
+  }
+  svgText(svg, m.left + w, height - 2, "Бюджет закупки, ₸ →", { class: "axis-title", "text-anchor": "end" });
+
+  // Текущий бюджет — вертикальная линия
+  svgEl("line", { x1: x(current), x2: x(current), y1: m.top, y2: m.top + h, class: "threshold" }, svg);
+  svgText(svg, x(current) + (x(current) > width - 100 ? -6 : 6), m.top + 10, "ваш бюджет", {
+    class: "axis-title", "text-anchor": x(current) > width - 100 ? "end" : "start",
+  });
+
+  svgEl("path", { d: "M" + curve.map((p) => `${x(p.budget)},${y(p.profit)}`).join(" L"), class: "fc-actual" }, svg);
+
+  const tooltip = createTooltip(container);
+  for (const p of curve) {
+    const g = svgEl("g", { class: "dot", tabindex: 0 }, svg);
+    svgEl("circle", { cx: x(p.budget), cy: y(p.profit), r: 14, class: "hit" }, g);
+    svgEl("circle", { cx: x(p.budget), cy: y(p.profit), r: 4.5, class: "dot-mark" }, g);
+    const show = (event) => {
+      g.classList.add("active");
+      const pos = event?.clientX ? pointerIn(container, event) : { x: x(p.budget), y: y(p.profit) };
+      tooltip.show(pos.x, pos.y, "Бюджет " + money(p.budget), [
+        { value: money(p.profit), label: "прибыль недели" },
+        { value: p.coverage_pct + "%", label: "спроса обеспечено" },
+      ]);
+    };
+    const hide = () => { g.classList.remove("active"); tooltip.hide(); };
+    g.addEventListener("pointermove", show);
+    g.addEventListener("pointerleave", hide);
+    g.addEventListener("focus", show);
+    g.addEventListener("blur", hide);
+  }
+}
