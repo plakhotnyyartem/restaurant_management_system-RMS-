@@ -7,6 +7,7 @@
   <link rel="icon" href="img/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script>try{var t=localStorage.getItem("rm_theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -14,6 +15,7 @@
 
   <main>
     <section class="hero">
+      <div class="aurora" aria-hidden="true"></div>
       <div class="container hero-inner">
         <div>
           <span class="eyebrow">🔥 Готовим на живом огне</span>
@@ -23,22 +25,30 @@
             <a href="menu.html" class="btn">Смотреть меню →</a>
             <a href="#popular" class="btn btn-ghost">Популярное</a>
           </div>
-          <div class="hero-stats">
-            <div><strong>40+</strong><span>блюд в меню</span></div>
-            <div><strong>15 мин</strong><span>среднее время готовки</span></div>
-            <div><strong>4.9 ★</strong><span>оценка гостей</span></div>
+          <div class="hero-stats" data-reveal>
+            <div><strong data-count="20" data-suffix="+">0</strong><span>блюд в меню</span></div>
+            <div><strong data-count="15" data-suffix=" мин">0</strong><span>среднее время готовки</span></div>
+            <div><strong data-count="4.9" data-suffix=" ★">0</strong><span>оценка гостей</span></div>
           </div>
         </div>
         <div class="hero-plate" aria-hidden="true">
           🍕
-          <span class="orbit o1">🍣</span>
-          <span class="orbit o2">🍔</span>
-          <span class="orbit o3">🍹</span>
+          <!-- Шесть блюд по кругу — как шесть точек логотипа RMS -->
+          <div class="orbit-ring">
+            <span class="orbit" style="--a:0deg"><span>🍣</span></span>
+            <span class="orbit" style="--a:60deg"><span>🍹</span></span>
+            <span class="orbit" style="--a:120deg"><span>🍔</span></span>
+            <span class="orbit" style="--a:180deg"><span>🥗</span></span>
+            <span class="orbit" style="--a:240deg"><span>🍰</span></span>
+            <span class="orbit" style="--a:300deg"><span>☕</span></span>
+          </div>
         </div>
       </div>
     </section>
 
-    <section class="section">
+    <div class="marquee" aria-hidden="true"><div class="marquee-track" id="marquee"></div></div>
+
+    <section class="section" data-reveal>
       <div class="container">
         <div class="section-head">
           <div>
@@ -50,7 +60,7 @@
       </div>
     </section>
 
-    <section class="section" id="popular">
+    <section class="section" id="popular" data-reveal>
       <div class="container">
         <div class="section-head">
           <div>
@@ -65,7 +75,7 @@
       </div>
     </section>
 
-    <section class="section">
+    <section class="section" data-reveal>
       <div class="container">
         <div class="section-head"><h2>Почему мы</h2></div>
         <div class="features">
@@ -107,6 +117,18 @@
             <span>${count} ${plural(count, "блюдо", "блюда", "блюд")}</span>
           </a>`;
       }).join("");
+
+      // Бегущая строка из реального меню; список повторён дважды для бесшовной прокрутки.
+      const items = dishes.filter((d) => d.is_available).map((d) =>
+        `<span>${dishEmoji(d, categories)} <b>${esc(d.name)}</b> ${money(d.price)}</span>`).join("");
+      document.getElementById("marquee").innerHTML = items + items;
+
+      // Настоящее число блюд в меню для счётчика в hero.
+      const counter = document.querySelector('[data-count="20"]');
+      if (counter) {
+        counter.dataset.count = String(dishes.length);
+        if (counter.closest(".revealed")) countUp(counter); // счётчик уже успел запуститься
+      }
 
       // «Популярные» — пока просто первые доступные блюда.
       // Позже здесь будет выборка из аналитики заказов (Big Data-модуль).
