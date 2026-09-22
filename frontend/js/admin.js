@@ -1,0 +1,603 @@
+/* =========================================================
+   admin.js — панель управления
+   Разделы зависят от роли: admin — всё, owner — аналитика,
+   waiter / cook — очередь заказов.
+   ========================================================= */
+
+const main = document.getElementById("section");
+
+const SECTIONS = {
+  dashboard: { icon: "📊", title: "Dashboard", roles: ["admin", "owner"] },
+  analytics: { icon: "🧠", title: "Аналитика", roles: ["admin", "owner"] },
+  orders: { icon: "🧾", title: "Заказы", roles: ["admin", "waiter", "cook"] },
+  dishes: { icon: "🍕", title: "Блюда", roles: ["admin"] },
+  categories: { icon: "🗂️", title: "Категории", roles: ["admin"] },
+  users: { icon: "👥", title: "Пользователи", roles: ["admin"] },
+};
+
+const STATUS_LABEL = {
+  pending: "Ожидает",
+  confirmed: "Принят",
+  preparing: "Готовится",
+  ready: "Готов к выдаче",
+  completed: "Выполнен",
+  cancelled: "Отменён",
+};
+
+// Та же матрица прав, что и в orders.go — на клиенте только чтобы показать нужные кнопки.
+// Проверку всё равно делает сервер.
+const NEXT_ACTIONS = {
+  pending: [
+    { to: "confirmed", label: "Принять", roles: ["waiter", "admin"] },
+    { to: "cancelled", label: "Отменить", roles: ["waiter", "admin"], danger: true },
+  ],
+  confirmed: [{ to: "preparing", label: "Начать готовить", roles: ["cook", "admin"] }],
+  preparing: [{ to: "ready", label: "Готово", roles: ["cook", "admin"] }],
+  ready: [{ to: "completed", label: "Выдан гостю", roles: ["waiter", "admin"] }],
+};
+
+let refreshTimer = null;
+let role = null;
+
+// ---------- Утилиты ----------
+
+function fmtPct(value) {
+  return (value > 0 ? "+" : "") + value.toFixed(1).replace(".", ",") + "%";
+}
+
+function deltaHtml(value) {
+  if (value === null || value === undefined) return '<span class="delta flat">нет данных для сравнения</span>';
+  if (Math.abs(value) < 0.5) return `<span class="delta flat">≈ ${fmtPct(value)} к прошлому периоду</span>`;
+  const up = value > 0;
+  return `<span class="delta ${up ? "up" : "down"}">${up ? "▲" : "▼"} ${fmtPct(value)} к прошлому периоду</span>`;
+}
+
+function errorBlock(title, error) {
+  return `<div class="empty"><div class="big">⚠️</div><h3>${esc(title)}</h3><p>${esc(error.message)}</p></div>`;
+}
+
+function adminError(error) {
+  const messages = {
+    "category already exists": "Такая категория уже есть",
+    "category has dishes, remove or move them first": "В категории есть блюда — сначала перенесите их",
+    "category not found": "Категория не найдена",
+    "dish has orders, make it unavailable instead": "Блюдо уже заказывали — его можно только скрыть из меню",
+    "your role cannot set this status": "Ваша роль не может поставить этот статус",
+    "invalid status transition": "Такой переход статуса невозможен",
+    "order was changed by someone else, reload it": "Заказ уже изменил другой сотрудник",
+  };
+  if (error.status === 403 && !messages[error.message]) return "Недостаточно прав";
+  return messages[error.message] || error.message;
+}
+
+// ---------- Dashboard ----------
+
+async function renderDashboard() {
+  try {
+    const [summary, sales, recs] = await Promise.all([
+      API.get("/admin/analytics/summary?days=7"),
+      API.get("/admin/analytics/sales?days=14"),
+      API.get("/admin/analytics/recommendations?days=30"),
+    ]);
+    const s = summary.current;
+
+    main.innerHTML = `
+      <h2>Dashboard</h2>
+      <p class="muted" style="margin:-12px 0 20px">Последние 7 дней</p>
+      <div class="stats">
+        <div class="stat"><span>Выручка</span><strong>${money(s.revenue)}</strong>${deltaHtml(summary.growth.revenue)}</div>
+        <div class="stat"><span>Заказы</span><strong>${s.orders.toLocaleString("ru-RU")}</strong>${deltaHtml(summary.growth.orders)}</div>
+        <div class="stat"><span>Средний чек</span><strong>${money(Math.round(s.avg_check))}</strong>${deltaHtml(summary.growth.avg_check)}</div>
+        <div class="stat"><span>Валовая прибыль</span><strong>${money(s.margin)}</strong>${deltaHtml(summary.growth.margin)}</div>
+      </div>
+      <div class="panel">
+        <h3>Выручка за 14 дней</h3>
+        <div id="dash-sales"></div>
+      </div>
+      <div class="panel">
+        <div class="section-head" style="margin-bottom:14px">
+          <h3 style="margin:0">🧠 Главное на сегодня</h3>
+          <a href="#analytics" class="btn btn-ghost btn-sm">Вся аналитика →</a>
+        </div>
+        <div class="recs">${recs.items.slice(0, 3).map(recCard).join("") || '<p class="muted">Пока недостаточно данных.</p>'}</div>
+      </div>`;
+
+    barChart(document.getElementById("dash-sales"), sales, {
+      valueKey: "revenue",
+      format: money,
+      extraRows: (p) => [{ value: p.orders, label: "заказов" }],
+    });
+  } catch (error) {
+    main.innerHTML = "<h2>Dashboard</h2>" + errorBlock("Не удалось загрузить данные", error);
+  }
+}
+
+// ---------- Аналитика ----------
+
+const REC_ICONS = { promote: "📣", price: "💰", remove: "🗑️", combo: "🍱", staff: "👨‍🍳", trend: "📈" };
+const REC_TYPES = { promote: "Реклама", price: "Цена", remove: "Меню", combo: "Комбо", staff: "Персонал", trend: "Тренд" };
+
+function recCard(r, i = 0) {
+  return `
+    <div class="rec" style="animation-delay:${i * 50}ms">
+      <div class="rec-icon">${REC_ICONS[r.type] || "💡"}</div>
+      <div>
+        <div class="rec-type">${REC_TYPES[r.type] || esc(r.type)}</div>
+        <h4>${esc(r.title)}</h4>
+        <p>${esc(r.detail)}</p>
+      </div>
+    </div>`;
+}
+
+let analyticsDays = 30;
+
+async function renderAnalytics() {
+  const periods = [7, 30, 90, 180];
+  main.innerHTML = `
+    <h2>Аналитика и рекомендации</h2>
+    <div class="filters">
+      <span class="label">Период:</span>
+      ${periods.map((d) => `<button class="chip ${d === analyticsDays ? "active" : ""}" data-days="${d}">${d} дн.</button>`).join("")}
+    </div>
+    <div id="analytics-body"><div class="skeleton" style="height:300px"></div></div>`;
+
+  main.querySelector(".filters").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-days]");
+    if (!chip) return;
+    analyticsDays = Number(chip.dataset.days);
+    main.querySelectorAll(".filters .chip").forEach((c) => c.classList.toggle("active", c === chip));
+    loadAnalytics();
+  });
+
+  await loadAnalytics();
+}
+
+async function loadAnalytics() {
+  const body = document.getElementById("analytics-body");
+  const days = analyticsDays;
+  body.style.opacity = 0.5; // при перезагрузке держим старую картинку, без «прыжка»
+
+  let summary, sales, menu, heat, pairs, recs;
+  try {
+    [summary, sales, menu, heat, pairs, recs] = await Promise.all([
+      API.get(`/admin/analytics/summary?days=${days}`),
+      API.get(`/admin/analytics/sales?days=${days}`),
+      API.get(`/admin/analytics/menu?days=${days}`),
+      API.get(`/admin/analytics/heatmap?days=${Math.max(days, 28)}`),
+      API.get(`/admin/analytics/pairs?days=${Math.max(days, 30)}&limit=8`),
+      API.get(`/admin/analytics/recommendations?days=${days}`),
+    ]);
+  } catch (error) {
+    body.style.opacity = 1;
+    body.innerHTML = errorBlock("Не удалось загрузить аналитику", error);
+    return;
+  }
+  if (days !== analyticsDays) return; // пользователь уже выбрал другой период
+
+  const s = summary.current;
+  const cancelRate = s.orders + s.cancelled ? (s.cancelled / (s.orders + s.cancelled)) * 100 : 0;
+
+  body.style.opacity = 1;
+  body.innerHTML = `
+    <div class="stats">
+      <div class="stat"><span>Выручка</span><strong>${money(s.revenue)}</strong>${deltaHtml(summary.growth.revenue)}</div>
+      <div class="stat"><span>Заказы</span><strong>${s.orders.toLocaleString("ru-RU")}</strong>${deltaHtml(summary.growth.orders)}</div>
+      <div class="stat"><span>Средний чек</span><strong>${money(Math.round(s.avg_check))}</strong>${deltaHtml(summary.growth.avg_check)}</div>
+      <div class="stat"><span>Валовая прибыль</span><strong>${money(s.margin)}</strong>
+        <small>${s.revenue ? Math.round((s.margin / s.revenue) * 100) : 0}% от выручки · отмен ${cancelRate.toFixed(1)}%</small></div>
+    </div>
+
+    <div class="panel">
+      <h3>🧠 Что сделать — рекомендации системы</h3>
+      <p class="muted" style="font-size:14px;margin:-8px 0 14px">Сформированы автоматически из инженерии меню, анализа корзин, нагрузки и динамики выручки.</p>
+      <div class="recs">${recs.items.map(recCard).join("") || '<p class="muted">Недостаточно данных за период.</p>'}</div>
+    </div>
+
+    <div class="panel">
+      <h3>Выручка по дням</h3>
+      <div id="chart-sales"></div>
+    </div>
+
+    <div class="panel">
+      <h3>Инженерия меню</h3>
+      <p class="muted" style="font-size:14px;margin:-8px 0 14px">
+        Метод Kasavana &amp; Smith: популярность (порог ${menu.popularity_threshold}% — 70% от «справедливой доли») ×
+        маржа с порции (порог ${money(menu.margin_threshold)} — средняя по меню).
+      </p>
+      <div id="chart-menu"></div>
+      <div class="table-wrap" style="margin-top:18px">
+        <table>
+          <thead><tr><th>Блюдо</th><th>Класс</th><th class="num">Продано</th><th class="num">Доля</th><th class="num">Маржа/порция</th><th class="num">Себест.</th><th>Что делать</th></tr></thead>
+          <tbody>
+            ${menu.dishes.map((d) => `
+              <tr>
+                <td><strong>${esc(d.name)}</strong><div class="muted" style="font-size:12px">${esc(d.category)}</div></td>
+                <td>${d.class ? `<span class="class-badge">${CLASS_INFO[d.class].icon} ${CLASS_INFO[d.class].name}</span>` : "—"}</td>
+                <td class="num">${d.quantity.toLocaleString("ru-RU")}</td>
+                <td class="num">${d.popularity}%</td>
+                <td class="num">${money(d.unit_margin)}</td>
+                <td class="num">${d.food_cost_pct}%</td>
+                <td class="advice">${esc(d.advice || "")}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="panel">
+        <h3>Нагрузка по дням и часам</h3>
+        <p class="muted" style="font-size:14px;margin:-8px 0 14px">Среднее число заказов в час — для графика смен.</p>
+        <div id="chart-heat"></div>
+      </div>
+      <div class="panel">
+        <h3>Что берут вместе</h3>
+        <p class="muted" style="font-size:14px;margin:-8px 0 14px">Ассоциативные правила: «из тех, кто взял A, X% взяли и B».</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Пара</th><th>Уверенность</th><th class="num">Lift</th></tr></thead>
+            <tbody>
+              ${pairs.map((p) => `
+                <tr>
+                  <td>${esc(p.name_a)} → ${esc(p.name_b)}<div class="muted" style="font-size:12px">${p.orders} заказов вместе</div></td>
+                  <td><div style="display:flex;gap:8px;align-items:center"><div class="meter" style="flex:1"><div style="width:${Math.min(p.confidence_ab, 100)}%"></div></div><span class="num">${p.confidence_ab}%</span></div></td>
+                  <td class="num">×${p.lift}</td>
+                </tr>`).join("") || '<tr><td colspan="3" class="muted">Нет данных</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+
+  if (menu.total_items > 0) {
+    barChart(document.getElementById("chart-sales"), sales, {
+      valueKey: "revenue",
+      format: money,
+      extraRows: (p) => [{ value: p.orders, label: "заказов" }],
+    });
+    menuMatrix(document.getElementById("chart-menu"), menu);
+    heatmap(document.getElementById("chart-heat"), heat);
+  }
+}
+
+// ---------- Очередь заказов ----------
+
+let ordersFilter = "active";
+
+async function renderOrders() {
+  const filters = [
+    ["active", "В работе"], ["pending", "Ожидают"], ["confirmed", "Приняты"], ["preparing", "Готовятся"],
+    ["ready", "Готовы"], ["completed", "Выполнены"], ["cancelled", "Отменены"],
+  ];
+  main.innerHTML = `
+    <h2>Заказы</h2>
+    <div class="filters">
+      ${filters.map(([k, label]) => `<button class="chip ${k === ordersFilter ? "active" : ""}" data-filter="${k}">${label}</button>`).join("")}
+      <span class="muted" style="font-size:13px;margin-left:auto" id="orders-updated"></span>
+    </div>
+    <div id="orders-board"></div>`;
+
+  main.querySelector(".filters").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-filter]");
+    if (!chip) return;
+    ordersFilter = chip.dataset.filter;
+    main.querySelectorAll(".filters .chip").forEach((c) => c.classList.toggle("active", c === chip));
+    loadOrders();
+  });
+
+  await loadOrders();
+  // Очередь обновляется сама — новые заказы появляются без перезагрузки страницы.
+  refreshTimer = setInterval(loadOrders, 15000);
+}
+
+function ticket(o) {
+  const actions = (NEXT_ACTIONS[o.status] || []).filter((a) => a.roles.includes(role));
+  const time = new Date(o.created_at);
+  const minutes = Math.round((Date.now() - time) / 60000);
+  const ago = minutes < 60 ? `${minutes} мин назад` : time.toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+  return `
+    <div class="ticket">
+      <div class="ticket-head">
+        <strong>#${o.id}</strong>
+        <span class="status ${o.status}">${STATUS_LABEL[o.status]}</span>
+      </div>
+      <ul>${o.items.map((i) => `<li><span>${esc(i.name)}</span><span>×${i.quantity}</span></li>`).join("")}</ul>
+      <div class="meta"><span>👤 ${esc(o.user_name)}</span><span>${ago}</span></div>
+      <div class="meta"><span>Сумма</span><strong style="color:var(--text)">${money(o.total_price)}</strong></div>
+      ${actions.length ? `<div class="actions">${actions.map((a) =>
+        `<button class="btn btn-sm ${a.danger ? "btn-danger" : ""}" data-order="${o.id}" data-to="${a.to}">${a.label}</button>`).join("")}</div>` : ""}
+    </div>`;
+}
+
+async function loadOrders() {
+  const board = document.getElementById("orders-board");
+  if (!board) return;
+  try {
+    const orders = await API.get(`/admin/orders?status=${ordersFilter}&limit=60`);
+    board.innerHTML = orders.length
+      ? `<div class="board">${orders.map(ticket).join("")}</div>`
+      : `<div class="empty"><div class="big">☕</div><h3>Заказов нет</h3><p>Новые заказы появятся здесь автоматически.</p></div>`;
+    document.getElementById("orders-updated").textContent =
+      "обновлено " + new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch (error) {
+    board.innerHTML = errorBlock("Не удалось загрузить заказы", error);
+  }
+}
+
+// ---------- Блюда ----------
+
+let editingDish = null;
+
+async function renderDishes() {
+  let dishes, categories;
+  try {
+    [dishes, categories] = await Promise.all([API.get("/admin/dishes"), API.get("/categories")]);
+  } catch (error) {
+    main.innerHTML = "<h2>Блюда</h2>" + errorBlock("Не удалось загрузить блюда", error);
+    return;
+  }
+  Data.dishesCache = null;
+
+  const d = editingDish || { name: "", description: "", price: "", cost_price: "", category_id: categories[0]?.id, image_url: "", is_available: true };
+
+  main.innerHTML = `
+    <h2>Блюда</h2>
+    <div class="panel">
+      <h3>${editingDish ? `Редактирование: ${esc(editingDish.name)}` : "Новое блюдо"}</h3>
+      <form id="dish-form" class="form-grid">
+        <div class="field"><label for="f-name">Название</label><input class="input" id="f-name" maxlength="150" required value="${esc(d.name)}"></div>
+        <div class="field"><label for="f-cat">Категория</label>
+          <select class="input" id="f-cat">${categories.map((c) => `<option value="${c.id}" ${c.id === d.category_id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>
+        <div class="field"><label for="f-price">Цена, ₸</label><input class="input" id="f-price" type="number" min="0" step="50" required value="${d.price}"></div>
+        <div class="field"><label for="f-cost">Себестоимость, ₸ <span class="muted">(для расчёта маржи)</span></label><input class="input" id="f-cost" type="number" min="0" step="10" value="${d.cost_price}"></div>
+        <div class="field full"><label for="f-desc">Описание</label><textarea class="input" id="f-desc">${esc(d.description)}</textarea></div>
+        <div class="field full"><label for="f-img">Ссылка на фото <span class="muted">(необязательно)</span></label><input class="input" id="f-img" value="${esc(d.image_url)}"></div>
+        <label class="checkbox full"><input type="checkbox" id="f-avail" ${d.is_available ? "checked" : ""}> Доступно для заказа</label>
+        <div class="full" style="display:flex;gap:10px;margin-top:16px">
+          <button class="btn" type="submit">${editingDish ? "Сохранить" : "+ Добавить блюдо"}</button>
+          ${editingDish ? '<button class="btn btn-ghost" type="button" id="cancel-edit">Отмена</button>' : ""}
+        </div>
+      </form>
+    </div>
+    <div class="panel table-wrap">
+      <table>
+        <thead><tr><th>Блюдо</th><th>Категория</th><th class="num">Цена</th><th class="num">Себест.</th><th class="num">Маржа</th><th>В меню</th><th></th></tr></thead>
+        <tbody>
+          ${dishes.map((x) => `
+            <tr>
+              <td><strong>${esc(x.name)}</strong></td>
+              <td class="muted">${esc(categoryName(categories, x.category_id))}</td>
+              <td class="num">${money(x.price)}</td>
+              <td class="num">${money(x.cost_price)}</td>
+              <td class="num">${x.price ? Math.round(((x.price - x.cost_price) / x.price) * 100) : 0}%</td>
+              <td><button class="switch ${x.is_available ? "on" : ""}" data-toggle="${x.id}" aria-label="Доступность" aria-pressed="${x.is_available}"></button></td>
+              <td class="actions">
+                <button class="btn btn-ghost btn-sm" data-edit="${x.id}">Изменить</button>
+                <button class="btn btn-danger btn-sm" data-delete-dish="${x.id}">Удалить</button>
+              </td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
+
+  document.getElementById("dish-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = {
+      name: document.getElementById("f-name").value,
+      category_id: Number(document.getElementById("f-cat").value),
+      price: Number(document.getElementById("f-price").value),
+      cost_price: Number(document.getElementById("f-cost").value || 0),
+      description: document.getElementById("f-desc").value,
+      image_url: document.getElementById("f-img").value.trim(),
+      is_available: document.getElementById("f-avail").checked,
+    };
+    try {
+      if (editingDish) {
+        await API.put("/admin/dishes/" + editingDish.id, body);
+        UI.toast("Блюдо сохранено", "success");
+      } else {
+        await API.post("/admin/dishes", body);
+        UI.toast(`«${body.name}» добавлено в меню`, "success");
+      }
+      editingDish = null;
+      renderDishes();
+    } catch (error) {
+      UI.toast(adminError(error), "error");
+    }
+  });
+
+  document.getElementById("cancel-edit")?.addEventListener("click", () => {
+    editingDish = null;
+    renderDishes();
+  });
+
+  main.querySelector("tbody").addEventListener("click", async (e) => {
+    const toggle = e.target.closest("[data-toggle]");
+    const edit = e.target.closest("[data-edit]");
+    const del = e.target.closest("[data-delete-dish]");
+
+    if (toggle) {
+      const next = !toggle.classList.contains("on");
+      try {
+        await API.request("PATCH", `/admin/dishes/${toggle.dataset.toggle}/availability`, { is_available: next });
+        toggle.classList.toggle("on", next);
+        toggle.setAttribute("aria-pressed", next);
+        UI.toast(next ? "Блюдо снова в меню" : "Блюдо скрыто (стоп-лист)", "success");
+      } catch (error) {
+        UI.toast(adminError(error), "error");
+      }
+    }
+    if (edit) {
+      editingDish = dishes.find((x) => x.id === Number(edit.dataset.edit));
+      renderDishes();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    if (del) {
+      if (!confirm("Удалить блюдо?")) return;
+      try {
+        await API.delete("/admin/dishes/" + del.dataset.deleteDish);
+        UI.toast("Блюдо удалено", "success");
+        renderDishes();
+      } catch (error) {
+        UI.toast(adminError(error), "error");
+      }
+    }
+  });
+}
+
+// ---------- Категории ----------
+
+async function renderCategories() {
+  Data.categoriesCache = null;
+  let categories;
+  try {
+    categories = await API.get("/categories");
+  } catch (error) {
+    main.innerHTML = "<h2>Категории</h2>" + errorBlock("Ошибка загрузки", error);
+    return;
+  }
+
+  main.innerHTML = `
+    <h2>Категории</h2>
+    <div class="panel">
+      <h3>Новая категория</h3>
+      <form class="inline-form" id="create-form">
+        <input class="input" id="new-name" placeholder="Например: Десерты" maxlength="100" required>
+        <button class="btn" type="submit">+ Добавить</button>
+      </form>
+    </div>
+    <div class="panel table-wrap">
+      <table>
+        <thead><tr><th style="width:70px">ID</th><th>Название</th><th></th></tr></thead>
+        <tbody>
+          ${categories.map((c) => `
+            <tr>
+              <td class="muted">${c.id}</td>
+              <td><input class="input" value="${esc(c.name)}" data-name="${c.id}" maxlength="100"></td>
+              <td class="actions">
+                <button class="btn btn-ghost btn-sm" data-save="${c.id}">Сохранить</button>
+                <button class="btn btn-danger btn-sm" data-delete="${c.id}">Удалить</button>
+              </td>
+            </tr>`).join("") || '<tr><td colspan="3" class="muted">Категорий пока нет</td></tr>'}
+        </tbody>
+      </table>
+    </div>`;
+
+  document.getElementById("create-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      const created = await API.post("/admin/categories", { name: document.getElementById("new-name").value });
+      UI.toast(`Категория «${created.name}» создана`, "success");
+      renderCategories();
+    } catch (error) {
+      UI.toast(adminError(error), "error");
+    }
+  });
+
+  main.querySelector("tbody").addEventListener("click", async (e) => {
+    const saveId = e.target.dataset.save;
+    const deleteId = e.target.dataset.delete;
+    if (saveId) {
+      try {
+        await API.put("/admin/categories/" + saveId, { name: main.querySelector(`[data-name="${saveId}"]`).value });
+        UI.toast("Сохранено", "success");
+      } catch (error) {
+        UI.toast(adminError(error), "error");
+      }
+    }
+    if (deleteId) {
+      if (!confirm("Удалить категорию?")) return;
+      try {
+        await API.delete("/admin/categories/" + deleteId);
+        UI.toast("Категория удалена", "success");
+        renderCategories();
+      } catch (error) {
+        UI.toast(adminError(error), "error");
+      }
+    }
+  });
+}
+
+// ---------- Пользователи ----------
+
+async function renderUsers() {
+  main.innerHTML = `
+    <h2>Пользователи</h2>
+    <div class="note"><span>🚧</span><span>Раздел ждёт бэкенд (RM-10): <code>GET /api/admin/users</code>, смена роли сотрудника.</span></div>`;
+}
+
+// ---------- Маршрутизация ----------
+
+// Раздел заказов — через делегирование, чтобы работало и после автообновления.
+main.addEventListener("click", async (e) => {
+  const button = e.target.closest("[data-order]");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    await API.put(`/admin/orders/${button.dataset.order}/status`, { status: button.dataset.to });
+    UI.toast(`Заказ #${button.dataset.order}: ${STATUS_LABEL[button.dataset.to]}`, "success");
+  } catch (error) {
+    UI.toast(adminError(error), "error");
+  }
+  loadOrders();
+});
+
+const renderers = {
+  dashboard: renderDashboard,
+  analytics: renderAnalytics,
+  orders: renderOrders,
+  dishes: renderDishes,
+  categories: renderCategories,
+  users: renderUsers,
+};
+
+function allowedSections() {
+  return Object.keys(SECTIONS).filter((key) => SECTIONS[key].roles.includes(role));
+}
+
+function route() {
+  clearInterval(refreshTimer);
+  const allowed = allowedSections();
+  const name = location.hash.slice(1);
+  const section = allowed.includes(name) ? name : allowed[0];
+
+  document.querySelectorAll("#admin-nav a").forEach((a) =>
+    a.classList.toggle("active", a.dataset.section === section));
+  main.innerHTML = '<div class="skeleton" style="height:200px"></div>';
+  renderers[section]();
+}
+
+// Перерисовать графики при изменении ширины окна (SVG строится под ширину контейнера).
+let resizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (location.hash === "#analytics") loadAnalytics();
+  }, 250);
+});
+
+// Проверка роли на клиенте — только для удобства интерфейса.
+// Настоящая защита — RequireRole(...) на бэкенде.
+if (Auth.requireLogin()) {
+  initPage("admin");
+  role = Auth.user().role;
+  const allowed = allowedSections();
+
+  if (!allowed.length) {
+    document.getElementById("admin").innerHTML = `
+      <div class="empty" style="grid-column:1/-1">
+        <div class="big">🔒</div>
+        <h3>Панель только для сотрудников</h3>
+        <p>Ваша роль: ${esc(role)}</p>
+        <a href="index.html" class="btn">На главную</a>
+      </div>`;
+  } else {
+    const roleTitle = { admin: "АДМИНИСТРАТОР", owner: "ВЛАДЕЛЕЦ", waiter: "ОФИЦИАНТ", cook: "ПОВАР" }[role];
+    document.getElementById("admin-nav").innerHTML =
+      `<div class="side-title">${roleTitle}</div>` +
+      allowed.map((key) => `<a href="#${key}" data-section="${key}">${SECTIONS[key].icon} ${SECTIONS[key].title}</a>`).join("");
+    window.addEventListener("hashchange", route);
+    route();
+  }
+}

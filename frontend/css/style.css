@@ -21,6 +21,11 @@
   --accent-soft: rgba(var(--accent-rgb), 0.12);
   --on-accent: #06141f;       /* текст на акцентном фоне */
 
+  /* Графики: тот же голубой, но темнее — проходит проверку контраста на тёмном фоне */
+  --chart-1: #3f95d2;
+  --chart-grid: #1f2833;
+  --chart-axis: #34404f;
+
   --danger: #f05252;
   --success: #34d399;
   --warning: #fbbf24;
@@ -742,6 +747,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .admin-side a:hover { background: var(--surface-2); color: var(--text); }
 .admin-side a.active { background: var(--accent-soft); color: var(--accent); }
 
+/* min-width: 0 — иначе широкая таблица растягивает колонку grid шире экрана */
+.admin-main { min-width: 0; }
 .admin-main h2 { font-size: 26px; margin-bottom: 20px; }
 
 .stats {
@@ -757,7 +764,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border: 1px solid var(--border);
 }
 .stat span { color: var(--muted); font-size: 14px; }
-.stat strong { display: block; font-size: 30px; font-weight: 800; margin-top: 4px; }
+.stat strong { display: block; font-size: clamp(22px, 2.4vw, 30px); font-weight: 800; margin-top: 4px; white-space: nowrap; }
 .stat small { color: var(--muted); font-size: 12px; }
 
 .panel {
@@ -788,6 +795,155 @@ td.actions { display: flex; gap: 8px; justify-content: flex-end; }
 }
 .flow .status { font-size: 14px; padding: 8px 14px; }
 .flow .arrow { color: var(--muted); }
+
+/* ---------- Аналитика и графики ---------- */
+
+.filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
+.filters .label { color: var(--muted); font-size: 14px; margin-right: 4px; }
+
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; max-width: 100%; height: auto; overflow: visible; }
+.chart .grid { stroke: var(--chart-grid); stroke-width: 1; }
+.chart .axis { stroke: var(--chart-axis); stroke-width: 1; }
+.chart .tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart .axis-title { fill: var(--muted); font-size: 12px; }
+.chart .direct-label { fill: var(--text); font-size: 12px; font-weight: 700; }
+.chart .bar { fill: var(--chart-1); transition: opacity 0.15s; }
+.chart .bar.active { fill: var(--accent-hover); }
+.chart .hit { fill: transparent; cursor: crosshair; outline: none; }
+.chart .cell { outline: none; transition: stroke 0.15s; }
+.chart .cell.active, .chart .cell:focus { stroke: var(--text); stroke-width: 1.5; }
+.chart .threshold { stroke: var(--chart-axis); stroke-width: 1; }
+.chart .quadrant-label { fill: var(--muted); font-size: 12px; font-weight: 700; }
+.chart .dot { cursor: pointer; outline: none; }
+.chart .dot .hit { fill: transparent; }
+.chart .dot-mark { fill: var(--chart-1); stroke: var(--surface); stroke-width: 2; transition: r 0.15s; }
+.chart .dot.active .dot-mark, .chart .dot:focus .dot-mark { r: 7; fill: var(--accent-hover); }
+.chart .dot-label { fill: var(--text); font-size: 11.5px; pointer-events: none; }
+
+.chart-tip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  min-width: 140px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+.chart-tip-title { color: var(--muted); margin-bottom: 4px; }
+.chart-tip-row { display: flex; gap: 8px; align-items: baseline; }
+.chart-tip-row strong { font-size: 15px; }
+.chart-tip-row span { color: var(--muted); }
+
+.heat-legend { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12px; color: var(--muted); }
+.heat-legend-bar { width: 160px; height: 8px; border-radius: 999px; }
+
+.stat .delta { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 700; margin-top: 6px; }
+.stat .delta.up { color: var(--success); }
+.stat .delta.down { color: var(--danger); }
+.stat .delta.flat { color: var(--muted); }
+
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 20px; }
+.grid-2 > * { min-width: 0; }
+
+.recs { display: flex; flex-direction: column; gap: 10px; }
+.rec {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  animation: rise 0.4s var(--ease) both;
+}
+.rec .rec-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  background: var(--accent-soft);
+}
+.rec h4 { font-size: 15px; margin-bottom: 2px; }
+.rec p { color: var(--muted); font-size: 14px; }
+.rec .rec-type { font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+
+.class-badge {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.advice { color: var(--muted); font-size: 13px; min-width: 260px; max-width: 420px; }
+
+.meter { position: relative; height: 6px; border-radius: 999px; background: var(--surface-3); min-width: 80px; }
+.meter > div { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--chart-1); }
+
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- Очередь заказов для персонала ---------- */
+
+.board { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.ticket {
+  padding: 16px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: rise 0.3s var(--ease) both;
+}
+.ticket-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ticket-head strong { font-size: 18px; }
+.ticket ul { list-style: none; font-size: 14px; }
+.ticket li { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dashed var(--border); }
+.ticket li:last-child { border-bottom: 0; }
+.ticket .meta { color: var(--muted); font-size: 13px; display: flex; justify-content: space-between; }
+.ticket .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- Форма блюда ---------- */
+
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.form-grid .full { grid-column: 1 / -1; }
+.checkbox { display: flex; align-items: center; gap: 10px; font-weight: 600; cursor: pointer; }
+.checkbox input { width: 18px; height: 18px; accent-color: var(--accent); }
+select.input { appearance: none; cursor: pointer; }
+textarea.input { resize: vertical; min-height: 70px; }
+
+.switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--surface-3);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.2s var(--ease), background 0.2s;
+}
+.switch.on { background: var(--accent-soft); }
+.switch.on::after { transform: translateX(18px); background: var(--accent); }
 
 /* ---------- Преимущества / футер ---------- */
 
@@ -890,6 +1046,7 @@ td.actions { display: flex; gap: 8px; justify-content: flex-end; }
   .admin-side { display: flex; overflow-x: auto; gap: 4px; }
   .admin-side .side-title { display: none; }
   .footer-inner { grid-template-columns: 1fr; }
+  .grid-2, .form-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 760px) {
