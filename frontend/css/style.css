@@ -1,27 +1,34 @@
 /* =========================================================
    Restaurant Management — общий стиль
-   Тёмная тема + оранжевые акценты
+   Тёмная тема + голубые акценты (цвет логотипа)
    ========================================================= */
 
 :root {
-  --bg: #0e0e10;
-  --surface: #17171a;
-  --surface-2: #202024;
-  --surface-3: #2a2a2f;
-  --border: #2e2e34;
-  --text: #f4f4f5;
-  --muted: #a1a1aa;
-  --accent: #ff7a1a;
-  --accent-hover: #ff8f3d;
-  --accent-soft: rgba(255, 122, 26, 0.12);
+  /* Палитра под логотип RMS: холодный тёмный фон + голубой акцент */
+  --bg: #0b0f14;
+  --bg-rgb: 11, 15, 20;
+  --surface: #121821;
+  --surface-2: #19212c;
+  --surface-3: #232d3a;
+  --border: #26303d;
+  --text: #f1f5f9;
+  --muted: #94a3b8;
+
+  --accent: #5dade2;          /* цвет значка из логотипа */
+  --accent-rgb: 93, 173, 226; /* тот же цвет для rgba() */
+  --accent-hover: #7cc0ec;
+  --accent-deep: #2f7fc1;     /* второй цвет для градиентов */
+  --accent-soft: rgba(var(--accent-rgb), 0.12);
+  --on-accent: #06141f;       /* текст на акцентном фоне */
+
   --danger: #f05252;
   --success: #34d399;
   --warning: #fbbf24;
-  --info: #60a5fa;
+  --info: #a78bfa;
 
   --radius: 16px;
   --radius-sm: 10px;
-  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
   --container: 1180px;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
@@ -69,13 +76,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border-radius: 999px;
   border: 1px solid transparent;
   background: var(--accent);
-  color: #1a0d02;
+  color: var(--on-accent);
   font-weight: 700;
   cursor: pointer;
   transition: background 0.2s, transform 0.15s var(--ease), box-shadow 0.2s;
   white-space: nowrap;
 }
-.btn:hover { background: var(--accent-hover); box-shadow: 0 6px 20px rgba(255, 122, 26, 0.3); }
+.btn:hover { background: var(--accent-hover); box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.3); }
 .btn:active { transform: scale(0.97); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
 
@@ -98,7 +105,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(14, 14, 16, 0.82);
+  background: rgba(var(--bg-rgb), 0.82);
   backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--border);
 }
@@ -112,23 +119,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 
 .logo {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  font-weight: 800;
-  font-size: 20px;
-  letter-spacing: -0.02em;
+  color: var(--text);
+  transition: opacity 0.2s;
 }
-.logo-mark {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  background: linear-gradient(135deg, var(--accent), #ff4d1a);
-  font-size: 18px;
-}
-.logo span b { color: var(--accent); }
+.logo:hover { opacity: 0.85; }
+.logo svg { height: 44px; width: auto; display: block; }
+.logo-lg { margin-bottom: 12px; }
+.logo-lg svg { height: 52px; }
+.logo-icon { fill: var(--accent); stroke: var(--accent); stroke-width: 0; }
+.logo-icon path { stroke-width: 2; }
+.logo:hover .logo-icon { animation: spin-in 0.8s var(--ease); transform-box: fill-box; transform-origin: center; }
 
 .nav { display: flex; align-items: center; gap: 4px; }
 
@@ -153,7 +155,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   margin-left: 4px;
   border-radius: 999px;
   background: var(--accent);
-  color: #1a0d02;
+  color: var(--on-accent);
   font-size: 12px;
   font-weight: 800;
 }
@@ -183,7 +185,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   inset: -40% -10% auto auto;
   width: 700px;
   height: 700px;
-  background: radial-gradient(circle, rgba(255, 122, 26, 0.22), transparent 65%);
+  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.2), transparent 65%);
   pointer-events: none;
 }
 .hero-inner {
@@ -226,7 +228,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   max-width: 440px;
   margin-left: auto;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #2d2d33, #151518 70%);
+  background: radial-gradient(circle at 35% 30%, #223042, #0f151d 70%);
   border: 1px solid var(--border);
   display: grid;
   place-items: center;
@@ -306,7 +308,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   transition: all 0.2s;
 }
 .chip:hover { color: var(--text); border-color: var(--surface-3); }
-.chip.active { background: var(--accent); border-color: var(--accent); color: #1a0d02; }
+.chip.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 
 /* ---------- Карточки блюд ---------- */
 
@@ -339,7 +341,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   place-items: center;
   font-size: 84px;
   background:
-    radial-gradient(circle at 50% 60%, rgba(255, 122, 26, 0.18), transparent 60%),
+    radial-gradient(circle at 50% 60%, rgba(var(--accent-rgb), 0.16), transparent 60%),
     var(--surface-2);
   overflow: hidden;
 }
@@ -355,7 +357,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
-  background: rgba(14, 14, 16, 0.8);
+  background: rgba(var(--bg-rgb), 0.8);
   border: 1px solid var(--border);
 }
 .tag.off { color: var(--danger); }
@@ -474,7 +476,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   cursor: pointer;
   transition: all 0.2s;
 }
-.tabs button.active { background: var(--accent); color: #1a0d02; }
+.tabs button.active { background: var(--accent); color: var(--on-accent); }
 
 /* ---------- Страница блюда ---------- */
 
@@ -605,7 +607,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   padding: 14px 18px;
   border-radius: var(--radius-sm);
   background: var(--accent-soft);
-  border: 1px solid rgba(255, 122, 26, 0.3);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
   color: var(--text);
   font-size: 14px;
   margin-bottom: 24px;
@@ -638,8 +640,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   place-items: center;
   font-size: 28px;
   font-weight: 800;
-  background: linear-gradient(135deg, var(--accent), #ff4d1a);
-  color: #1a0d02;
+  background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+  color: var(--on-accent);
 }
 .profile-head .who { flex: 1; min-width: 180px; }
 .profile-head h2 { font-size: 24px; }
@@ -867,6 +869,7 @@ td.actions { display: flex; gap: 8px; justify-content: flex-end; }
 /* ---------- Анимации ---------- */
 
 @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes spin-in { from { rotate: -60deg; } to { rotate: 0deg; } }
 @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
 @keyframes bump { 0% { transform: scale(1); } 40% { transform: scale(1.35); } 100% { transform: scale(1); } }
 @keyframes shimmer { to { background-position: -200% 0; } }
