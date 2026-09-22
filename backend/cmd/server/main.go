@@ -41,6 +41,11 @@ func main() {
 		DB: db,
 	}
 
+	inventoryHandler := &handlers.InventoryHandler{
+		DB:        db,
+		Analytics: analyticsHandler,
+	}
+
 	router.GET("/api/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":   "ok",
@@ -89,6 +94,16 @@ func main() {
 	analytics.GET("/pairs", analyticsHandler.Pairs)
 	analytics.GET("/recommendations", analyticsHandler.Recommendations)
 	analytics.GET("/forecast", analyticsHandler.Forecast)
+	analytics.GET("/purchasing", inventoryHandler.PurchasePlan)
+
+	// Warehouse: the cook sees stock and receives deliveries, the owner watches it
+	inventory := protected.Group("/admin/inventory")
+	inventory.Use(handlers.RequireRole("admin", "owner", "cook"))
+	inventory.GET("", inventoryHandler.GetInventory)
+	inventoryWrite := protected.Group("/admin/inventory")
+	inventoryWrite.Use(handlers.RequireRole("admin", "cook"))
+	inventoryWrite.POST("/receive", inventoryHandler.Receive)
+	inventoryWrite.PUT("/:id", inventoryHandler.SetStock)
 
 	admin := protected.Group("/admin")
 	admin.Use(handlers.RequireRole("admin"))

@@ -10,6 +10,8 @@ const SECTIONS = {
   dashboard: { icon: "📊", title: "Dashboard", roles: ["admin", "owner"] },
   analytics: { icon: "🧠", title: "Аналитика", roles: ["admin", "owner"] },
   forecast: { icon: "🔮", title: "Прогноз", roles: ["admin", "owner"] },
+  purchasing: { icon: "🛒", title: "Закупки", roles: ["admin", "owner"] },
+  inventory: { icon: "📦", title: "Склад", roles: ["admin", "owner", "cook"] },
   orders: { icon: "🧾", title: "Заказы", roles: ["admin", "waiter", "cook"] },
   dishes: { icon: "🍕", title: "Блюда", roles: ["admin"] },
   categories: { icon: "🗂️", title: "Категории", roles: ["admin"] },
@@ -339,6 +341,243 @@ async function renderForecast() {
   forecastChart(document.getElementById("chart-forecast"), fc.history, fc.forecast);
 }
 
+// ---------- Закупки: линейное программирование ----------
+
+let purchaseBudget = 0; // 0 = бюджет, покрывающий весь прогноз
+let purchaseSafety = 10;
+let lastPlan = null;
+
+async function renderPurchasing() {
+  main.innerHTML = `
+    <h2>Оптимизация закупок</h2>
+    <div class="filters" id="plan-filters">
+      <span class="label">Бюджет на неделю:</span>
+      <input class="input" id="plan-budget" type="number" min="0" step="10000" style="width:160px" placeholder="авто">
+      <span id="budget-presets" style="display:flex;gap:6px;flex-wrap:wrap"></span>
+      <span class="label" style="margin-left:8px">Запас:</span>
+      <select class="input" id="plan-safety" style="width:90px">
+        ${[0, 10, 20, 30].map((v) => `<option value="${v}" ${v === purchaseSafety ? "selected" : ""}>${v}%</option>`).join("")}
+      </select>
+      <button class="btn btn-sm" id="plan-run">Рассчитать</button>
+    </div>
+    <div id="plan-body"><div class="skeleton" style="height:300px"></div></div>`;
+
+  document.getElementById("plan-run").addEventListener("click", () => {
+    purchaseBudget = Number(document.getElementById("plan-budget").value) || 0;
+    purchaseSafety = Number(document.getElementById("plan-safety").value);
+    loadPlan();
+  });
+  document.getElementById("budget-presets").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-share]");
+    if (!chip || !lastPlan) return;
+    purchaseBudget = Math.round((lastPlan.full_budget * Number(chip.dataset.share)) / 1000) * 1000;
+    loadPlan();
+  });
+  await loadPlan();
+}
+
+async function loadPlan() {
+  const body = document.getElementById("plan-body");
+  body.style.opacity = 0.5;
+  let plan;
+  try {
+    plan = await API.get(`/admin/analytics/purchasing?safety=${purchaseSafety}&budget=${purchaseBudget}`);
+  } catch (error) {
+    body.style.opacity = 1;
+    body.innerHTML = errorBlock("Не удалось рассчитать план", error);
+    return;
+  }
+  lastPlan = plan;
+  body.style.opacity = 1;
+
+  document.getElementById("plan-budget").value = Math.round(plan.budget);
+  document.getElementById("budget-presets").innerHTML = [[1, "100%"], [0.75, "75%"], [0.5, "50%"], [0.25, "25%"]]
+    .map(([share, label]) => {
+      const active = Math.abs(plan.budget - plan.full_budget * share) < 1000;
+      return `<button class="chip ${active ? "active" : ""}" data-share="${share}">${label}</button>`;
+    }).join("");
+
+  const toBuy = plan.items.filter((i) => i.packs > 0);
+  const shadow = plan.budget_limited
+    ? `<strong>+${money(Math.round(plan.budget_shadow_price * 1000))}</strong><small>прибыли на каждые +1 000 ₸ бюджета</small>`
+    : `<strong>0 ₸</strong><small>бюджет не ограничивает — спрос покрыт полностью</small>`;
+
+  body.innerHTML = `
+    <div class="stats">
+      <div class="stat"><span>Закупка</span><strong>${money(plan.total_cost)}</strong>
+        <small>из ${money(plan.budget)} · полный план ${money(plan.full_budget)}</small></div>
+      <div class="stat"><span>Спрос обеспечен</span><strong>${plan.coverage_pct}%</strong>
+        <small>прогноз на ${plan.days} дней + ${plan.safety_pct}% запас</small></div>
+      <div class="stat"><span>Ожидаемая выручка</span><strong>${money(plan.expected_revenue)}</strong>
+        <small>прибыль после закупки ${money(plan.expected_profit)}</small></div>
+      <div class="stat"><span>Теневая цена бюджета</span>${shadow}</div>
+    </div>
+
+    ${plan.no_recipe.length ? `<div class="note"><span>⚠️</span><span>Нет техкарты — блюда не учтены в плане: ${plan.no_recipe.map(esc).join(", ")}</span></div>` : ""}
+
+    <div class="grid-2">
+      <div class="panel">
+        <h3>Что даёт каждый тенге бюджета</h3>
+        <p class="muted" style="font-size:14px;margin:-8px 0 10px">Та же задача, решённая для 0–100% полного бюджета: отдача убывает.</p>
+        <div id="chart-budget"></div>
+      </div>
+      <div class="panel">
+        <h3>Какие блюда обеспечены</h3>
+        <p class="muted" style="font-size:14px;margin:-8px 0 10px">При нехватке денег решатель сам выбирает самые выгодные блюда.</p>
+        <div class="table-wrap" style="max-height:260px;overflow-y:auto">
+          <table>
+            <thead><tr><th>Блюдо</th><th class="num">План / спрос</th><th style="width:40%">Покрытие</th></tr></thead>
+            <tbody>
+              ${plan.dishes.map((d) => `
+                <tr>
+                  <td>${esc(d.name)}</td>
+                  <td class="num">${d.planned} / ${d.demand}</td>
+                  <td><div style="display:flex;gap:8px;align-items:center"><div class="meter" style="flex:1"><div style="width:${Math.min(d.coverage_pct, 100)}%"></div></div><span class="num" style="min-width:42px">${Math.round(d.coverage_pct)}%</span></div></td>
+                </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="section-head" style="margin-bottom:14px">
+        <h3 style="margin:0">🛒 Список закупки — ${toBuy.length} позиций</h3>
+        ${role === "admin" && toBuy.length ? '<button class="btn btn-sm" id="plan-apply">Оприходовать поставку</button>' : ""}
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Продукт</th><th class="num">Нужно</th><th class="num">На складе</th><th class="num">Купить</th><th class="num">Упаковок</th><th class="num">Сумма</th><th></th></tr></thead>
+          <tbody>
+            ${toBuy.map((i) => `
+              <tr>
+                <td><strong>${esc(i.name)}</strong></td>
+                <td class="num">${i.need} ${esc(i.unit)}</td>
+                <td class="num muted">${i.stock} ${esc(i.unit)}</td>
+                <td class="num"><strong>${i.buy} ${esc(i.unit)}</strong></td>
+                <td class="num">${i.packs} × ${i.pack_size}</td>
+                <td class="num">${money(i.cost)}</td>
+                <td>${i.warning ? `<span class="warn">⚠ ${esc(i.warning)}</span>` : ""}</td>
+              </tr>`).join("") || '<tr><td colspan="7" class="muted">Закупать ничего не нужно — на складе хватает.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Постановка задачи</h3>
+      <div class="lp-formula">максимизировать   Σ цена_блюда · порции  −  Σ цена_продукта · закупка
+при условиях      Σ техкарта · порции − закупка ≤ остаток     (${plan.items.length} продуктов)
+                  Σ цена_продукта · закупка     ≤ бюджет      (1 ограничение)
+                  порции                        ≤ прогноз      (${plan.dishes.length} блюд)
+                  порции, закупка ≥ 0</div>
+      <p class="muted" style="font-size:14px;margin-top:12px">
+        Решено ${esc(plan.solver.method)}: ${plan.solver.variables} переменных, ${plan.solver.constraints} ограничений,
+        ${plan.solver.pivots} шагов. Дробные килограммы затем округлены до целых упаковок в пределах бюджета.
+        Теневая цена — двойственная оценка ограничения бюджета: на сколько вырастет прибыль, если дать ещё 1 ₸.
+      </p>
+    </div>`;
+
+  budgetCurveChart(document.getElementById("chart-budget"), plan.curve, plan.budget);
+
+  document.getElementById("plan-apply")?.addEventListener("click", async () => {
+    if (!confirm(`Добавить на склад ${toBuy.length} позиций на ${money(plan.total_cost)}?`)) return;
+    try {
+      await API.post("/admin/inventory/receive", {
+        items: toBuy.map((i) => ({ ingredient_id: i.ingredient_id, quantity: i.buy })),
+      });
+      UI.toast("Поставка оприходована — остатки обновлены", "success");
+      loadPlan();
+    } catch (error) {
+      UI.toast(adminError(error), "error");
+    }
+  });
+}
+
+// ---------- Склад ----------
+
+const STOCK_STATUS = {
+  critical: "● Заканчивается",
+  low: "● Мало",
+  ok: "● В норме",
+  unused: "○ Не используется",
+};
+
+let inventoryFilter = "all";
+
+async function renderInventory() {
+  let rows;
+  try {
+    rows = await API.get("/admin/inventory");
+  } catch (error) {
+    main.innerHTML = "<h2>Склад</h2>" + errorBlock("Не удалось загрузить склад", error);
+    return;
+  }
+  const canEdit = role === "admin" || role === "cook";
+  const order = { critical: 0, low: 1, ok: 2, unused: 3 };
+  rows.sort((a, b) => order[a.status] - order[b.status] || (a.days_cover ?? 999) - (b.days_cover ?? 999));
+  const shown = inventoryFilter === "all" ? rows : rows.filter((r) => r.status === "critical" || r.status === "low");
+  const critical = rows.filter((r) => r.status === "critical").length;
+  const low = rows.filter((r) => r.status === "low").length;
+
+  main.innerHTML = `
+    <h2>Склад</h2>
+    <div class="stats">
+      <div class="stat"><span>Позиций</span><strong>${rows.length}</strong><small>продуктов в техкартах</small></div>
+      <div class="stat"><span>Заканчиваются</span><strong>${critical}</strong><small>хватит меньше чем на 2 дня</small></div>
+      <div class="stat"><span>Мало</span><strong>${low}</strong><small>хватит на 2–5 дней</small></div>
+      <div class="stat"><span>Стоимость запаса</span><strong>${money(Math.round(rows.reduce((s, r) => s + r.stock * r.price, 0)))}</strong><small>по закупочным ценам</small></div>
+    </div>
+    <div class="filters">
+      <button class="chip ${inventoryFilter === "all" ? "active" : ""}" data-inv="all">Все</button>
+      <button class="chip ${inventoryFilter === "low" ? "active" : ""}" data-inv="low">Нужно докупить (${critical + low})</button>
+      ${role !== "cook" ? '<a href="#purchasing" class="btn btn-ghost btn-sm" style="margin-left:auto">Рассчитать закупку →</a>' : ""}
+    </div>
+    <div class="panel table-wrap">
+      <table>
+        <thead><tr><th>Продукт</th><th>Статус</th><th class="num">Остаток</th><th class="num">Нужно на неделю</th><th class="num">Хватит на</th><th class="num">Цена</th></tr></thead>
+        <tbody>
+          ${shown.map((r) => `
+            <tr>
+              <td><strong>${esc(r.name)}</strong><div class="muted" style="font-size:12px">срок хранения ${r.shelf_life_days} дн.</div></td>
+              <td><span class="stock-badge ${r.status}">${STOCK_STATUS[r.status]}</span></td>
+              <td class="num">${canEdit
+                ? `<input class="input stock-input" type="number" min="0" step="0.1" value="${r.stock}" data-stock="${r.id}" aria-label="Остаток ${esc(r.name)}"> ${esc(r.unit)}`
+                : `${r.stock} ${esc(r.unit)}`}</td>
+              <td class="num">${r.weekly_need} ${esc(r.unit)}</td>
+              <td class="num">${r.days_cover === null ? "—" : r.days_cover >= 99 ? "99+ дн." : r.days_cover.toFixed(1).replace(".", ",") + " дн."}</td>
+              <td class="num muted">${money(r.price)} / ${esc(r.unit)}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>
+    ${canEdit ? '<p class="muted" style="font-size:13px">Измените остаток и нажмите Enter — так фиксируется инвентаризация. Продукты списываются автоматически, когда повар начинает готовить заказ.</p>' : ""}`;
+
+  main.querySelector(".filters").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-inv]");
+    if (!chip) return;
+    inventoryFilter = chip.dataset.inv;
+    renderInventory();
+  });
+
+  main.querySelectorAll("[data-stock]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const value = Number(input.value);
+      if (!(value >= 0)) {
+        UI.toast("Остаток не может быть отрицательным", "error");
+        return;
+      }
+      try {
+        await API.put("/admin/inventory/" + input.dataset.stock, { quantity: value });
+        UI.toast("Остаток обновлён", "success");
+        renderInventory();
+      } catch (error) {
+        UI.toast(adminError(error), "error");
+      }
+    });
+  });
+}
+
 // ---------- Очередь заказов ----------
 
 let ordersFilter = "active";
@@ -626,6 +865,8 @@ const renderers = {
   dashboard: renderDashboard,
   analytics: renderAnalytics,
   forecast: renderForecast,
+  purchasing: renderPurchasing,
+  inventory: renderInventory,
   orders: renderOrders,
   dishes: renderDishes,
   categories: renderCategories,
@@ -655,6 +896,7 @@ window.addEventListener("resize", () => {
   resizeTimer = setTimeout(() => {
     if (location.hash === "#analytics") loadAnalytics();
     if (location.hash === "#forecast") renderForecast();
+    if (location.hash === "#purchasing" && lastPlan) loadPlan();
   }, 250);
 });
 
