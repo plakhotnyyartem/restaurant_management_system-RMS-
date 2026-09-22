@@ -821,6 +821,17 @@ td.actions { display: flex; gap: 8px; justify-content: flex-end; }
 .chart .dot.active .dot-mark, .chart .dot:focus .dot-mark { r: 7; fill: var(--accent-hover); }
 .chart .dot-label { fill: var(--text); font-size: 11.5px; pointer-events: none; }
 
+.chart .fc-actual { fill: none; stroke: var(--chart-1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .fc-line { fill: none; stroke: var(--chart-1); stroke-width: 2; stroke-dasharray: 5 4; stroke-linejoin: round; stroke-linecap: round; }
+.chart .fc-band { fill: var(--chart-1); opacity: 0.12; }
+.chart .crosshair { stroke: var(--muted); stroke-width: 1; }
+
+.chart-legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.chart-legend > span { display: inline-flex; align-items: center; gap: 8px; }
+.chart-legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--chart-1); }
+.chart-legend i.key-forecast { border-top-style: dashed; }
+.chart-legend i.key-band { height: 10px; border: 0; border-radius: 3px; background: var(--chart-1); opacity: 0.25; }
+
 .chart-tip {
   position: absolute;
   z-index: 5;
