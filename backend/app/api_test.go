@@ -612,3 +612,148 @@ func TestTelegramDisabled(t *testing.T) {
 	}
 	expect(t, request(t, "POST", "/api/telegram/link", token, nil), http.StatusServiceUnavailable, "link without a bot")
 }
+
+// ---------- recipes (tech cards) ----------
+
+// newIngredient creates an ingredient through the API and removes it afterwards.
+func newIngredient(t *testing.T, admin, name, unit string, price float64) int {
+	t.Helper()
+	res := request(t, "POST", "/api/admin/ingredients", admin, map[string]any{
+		"name": name, "unit": unit, "price": price, "pack_size": 1, "shelf_life_days": 7,
+	})
+	expect(t, res, http.StatusCreated, "create ingredient "+name)
+	id := int(res.Body["id"].(float64))
+	t.Cleanup(func() {
+		ctx := context.Background()
+		testDB.Exec(ctx, `DELETE FROM recipe_items WHERE ingredient_id = $1`, id)
+		testDB.Exec(ctx, `DELETE FROM ingredients WHERE id = $1`, id)
+	})
+	return id
+}
+
+func TestRecipeEditor(t *testing.T) {
+	needDB(t)
+	ctx := context.Background()
+	_, admin := createUser(t, "admin")
+	_, cook := createUser(t, "cook")
+	_, owner := createUser(t, "owner")
+	_, waiter := createUser(t, "waiter")
+	customerID, customer := createUser(t, "customer")
+	_ = customerID
+
+	_, _, category := dishByName(t, "Пепперони")
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	dough := newIngredient(t, admin, "Тест тесто "+suffix, "кг", 400)
+	cheese := newIngredient(t, admin, "Тест сыр "+suffix, "кг", 5000)
+	expect(t, request(t, "POST", "/api/admin/ingredients", admin, map[string]any{
+		"name": "Тест тесто " + suffix, "unit": "кг", "price": 1, "pack_size": 1, "shelf_life_days": 1,
+	}), http.StatusConflict, "duplicate ingredient name")
+	expect(t, request(t, "POST", "/api/admin/ingredients", admin, map[string]any{
+		"name": "Плохая единица", "unit": "ведро", "price": 1, "pack_size": 1, "shelf_life_days": 1,
+	}), http.StatusBadRequest, "unknown unit")
+
+	// A new dish added from the admin panel has no recipe yet.
+	dish := request(t, "POST", "/api/admin/dishes", admin, map[string]any{
+		"name": "Тест пицца " + suffix, "price": 3000, "cost_price": 0, "category_id": category,
+	})
+	expect(t, dish, http.StatusCreated, "create dish")
+	dishID := int(dish.Body["id"].(float64))
+	// Cleanups run in reverse order, so this one runs BEFORE the users' cleanups:
+	// remove the orders with this dish first, or the foreign key keeps the dish.
+	t.Cleanup(func() {
+		testDB.Exec(ctx, `DELETE FROM orders WHERE id IN (SELECT order_id FROM order_items WHERE dish_id = $1)`, dishID)
+		testDB.Exec(ctx, `DELETE FROM dishes WHERE id = $1`, dishID)
+	})
+	recipePath := fmt.Sprintf("/api/admin/dishes/%d/recipe", dishID)
+
+	empty := request(t, "GET", recipePath, cook, nil)
+	expect(t, empty, http.StatusOK, "empty recipe")
+	if n := len(empty.Body["items"].([]any)); n != 0 {
+		t.Fatalf("new dish has %d recipe lines", n)
+	}
+
+	// Validation.
+	bad := map[string]any{
+		"zero quantity":      []map[string]any{{"ingredient_id": dough, "quantity": 0}},
+		"huge quantity":      []map[string]any{{"ingredient_id": dough, "quantity": 500}},
+		"duplicate line":     []map[string]any{{"ingredient_id": dough, "quantity": 0.2}, {"ingredient_id": dough, "quantity": 0.1}},
+		"unknown ingredient": []map[string]any{{"ingredient_id": 99999999, "quantity": 0.2}},
+	}
+	for name, items := range bad {
+		expect(t, request(t, "PUT", recipePath, admin, map[string]any{"items": items}), http.StatusBadRequest, name)
+	}
+
+	// Rights: admin and cook edit recipes; owner and waiter don't; the catalogue is admin-only.
+	body := map[string]any{"items": []map[string]any{
+		{"ingredient_id": dough, "quantity": 0.25},
+		{"ingredient_id": cheese, "quantity": 0.12},
+	}, "update_cost": true}
+	expect(t, request(t, "PUT", recipePath, owner, body), http.StatusForbidden, "owner edits a recipe")
+	expect(t, request(t, "PUT", recipePath, waiter, body), http.StatusForbidden, "waiter edits a recipe")
+	expect(t, request(t, "GET", "/api/admin/recipes", customer, nil), http.StatusForbidden, "customer lists recipes")
+	expect(t, request(t, "POST", "/api/admin/ingredients", cook, map[string]any{
+		"name": "Повар добавил", "unit": "кг", "price": 1, "pack_size": 1, "shelf_life_days": 1,
+	}), http.StatusForbidden, "cook edits the catalogue")
+
+	saved := request(t, "PUT", recipePath, cook, body)
+	expect(t, saved, http.StatusOK, "cook saves the recipe")
+	// 0.25 × 400 + 0.12 × 5000 = 100 + 600 = 700 ₸
+	if cost := saved.Body["recipe_cost"].(float64); cost != 700 {
+		t.Fatalf("recipe cost = %v, want 700", cost)
+	}
+	if cp := saved.Body["cost_price"].(float64); cp != 700 {
+		t.Fatalf("dish cost price = %v, want 700 (update_cost)", cp)
+	}
+
+	// The list shows the dish with its recipe.
+	list := request(t, "GET", "/api/admin/recipes", cook, nil)
+	expect(t, list, http.StatusOK, "list recipes")
+	found := false
+	for _, r := range list.List {
+		row := r.(map[string]any)
+		if int(row["dish_id"].(float64)) == dishID {
+			found = row["items"].(float64) == 2 && row["recipe_cost"].(float64) == 700
+		}
+	}
+	if !found {
+		t.Fatal("the recipes list does not show the new recipe correctly")
+	}
+
+	// A new ingredient price changes the recipe cost; saving without update_cost keeps the dish cost.
+	expect(t, request(t, "PUT", fmt.Sprintf("/api/admin/ingredients/%d", cheese), admin, map[string]any{
+		"name": "Тест сыр " + suffix, "unit": "кг", "price": 6000, "pack_size": 1, "shelf_life_days": 7,
+	}), http.StatusOK, "raise the cheese price")
+	body["update_cost"] = false
+	resaved := request(t, "PUT", recipePath, admin, body)
+	expect(t, resaved, http.StatusOK, "save again")
+	if resaved.Body["recipe_cost"].(float64) != 820 || resaved.Body["cost_price"].(float64) != 700 {
+		t.Fatalf("recipe cost %v (want 820), cost price %v (want 700 — not updated)",
+			resaved.Body["recipe_cost"], resaved.Body["cost_price"])
+	}
+
+	// An ingredient used in a recipe cannot be deleted.
+	expect(t, request(t, "DELETE", fmt.Sprintf("/api/admin/ingredients/%d", cheese), admin, nil), http.StatusConflict, "delete used ingredient")
+
+	// The recipe now drives the stock write-off for the new dish.
+	testDB.Exec(ctx, `INSERT INTO stock (ingredient_id, quantity) VALUES ($1, 10), ($2, 10)
+		ON CONFLICT (ingredient_id) DO UPDATE SET quantity = 10`, dough, cheese)
+	order := request(t, "POST", "/api/orders", customer, map[string]any{"items": []map[string]any{{"dish_id": dishID, "quantity": 2}}})
+	expect(t, order, http.StatusCreated, "order the new dish")
+	status := fmt.Sprintf("/api/admin/orders/%d/status", int(order.Body["id"].(float64)))
+	expect(t, request(t, "PUT", status, admin, map[string]string{"status": "confirmed"}), http.StatusOK, "confirm")
+	expect(t, request(t, "PUT", status, cook, map[string]string{"status": "preparing"}), http.StatusOK, "cook")
+	var doughLeft, cheeseLeft float64
+	testDB.QueryRow(ctx, `SELECT quantity FROM stock WHERE ingredient_id = $1`, dough).Scan(&doughLeft)
+	testDB.QueryRow(ctx, `SELECT quantity FROM stock WHERE ingredient_id = $1`, cheese).Scan(&cheeseLeft)
+	if doughLeft != 9.5 || cheeseLeft != 9.76 {
+		t.Fatalf("stock after 2 portions: dough %v (want 9.5), cheese %v (want 9.76)", doughLeft, cheeseLeft)
+	}
+
+	// An empty list removes the recipe.
+	cleared := request(t, "PUT", recipePath, admin, map[string]any{"items": []any{}})
+	expect(t, cleared, http.StatusOK, "clear recipe")
+	if n := len(cleared.Body["items"].([]any)); n != 0 {
+		t.Fatalf("recipe still has %d lines", n)
+	}
+	expect(t, request(t, "PUT", "/api/admin/dishes/99999999/recipe", admin, map[string]any{"items": []any{}}), http.StatusNotFound, "unknown dish")
+}

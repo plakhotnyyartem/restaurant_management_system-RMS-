@@ -41,6 +41,10 @@ func NewRouter(db *pgxpool.Pool, bot *handlers.TelegramBot) *gin.Engine {
 		orderHandler.Notify = bot
 	}
 
+	recipeHandler := &handlers.RecipeHandler{
+		DB: db,
+	}
+
 	telegramHandler := &handlers.TelegramHandler{
 		DB:  db,
 		Bot: bot,
@@ -129,8 +133,21 @@ func NewRouter(db *pgxpool.Pool, bot *handlers.TelegramBot) *gin.Engine {
 	inventoryWrite.POST("/receive", inventoryHandler.Receive)
 	inventoryWrite.PUT("/:id", inventoryHandler.SetStock)
 
+	// Recipes: the admin and the cook (the kitchen knows what goes into a dish)
+	kitchen := protected.Group("/admin")
+	kitchen.Use(handlers.RequireRole("admin", "cook"))
+	kitchen.GET("/recipes", recipeHandler.ListRecipes)
+	kitchen.GET("/dishes/:id/recipe", recipeHandler.GetRecipe)
+	kitchen.PUT("/dishes/:id/recipe", recipeHandler.SaveRecipe)
+	kitchen.GET("/ingredients", recipeHandler.ListIngredients)
+
 	admin := protected.Group("/admin")
 	admin.Use(handlers.RequireRole("admin"))
+	// Ingredient catalogue and purchase prices — admin only
+	admin.POST("/ingredients", recipeHandler.CreateIngredient)
+	admin.PUT("/ingredients/:id", recipeHandler.UpdateIngredient)
+	admin.DELETE("/ingredients/:id", recipeHandler.DeleteIngredient)
+
 	admin.POST("/categories", categoryHandler.CreateCategory)
 	admin.PUT("/categories/:id", categoryHandler.UpdateCategory)
 	admin.DELETE("/categories/:id", categoryHandler.DeleteCategory)

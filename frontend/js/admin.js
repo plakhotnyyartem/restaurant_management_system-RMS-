@@ -15,6 +15,7 @@ const SECTIONS = {
   inventory: { icon: "📦", title: "Склад", roles: ["admin", "owner", "cook"] },
   orders: { icon: "🧾", title: "Заказы", roles: ["admin", "waiter", "cook"] },
   dishes: { icon: "🍕", title: "Блюда", roles: ["admin"] },
+  recipes: { icon: "📝", title: "Техкарты", roles: ["admin", "cook"] },
   categories: { icon: "🗂️", title: "Категории", roles: ["admin"] },
   users: { icon: "👥", title: "Пользователи", roles: ["admin"] },
 };
@@ -42,6 +43,7 @@ const NEXT_ACTIONS = {
 
 let refreshTimer = null;
 let role = null;
+let routeParam; // часть адреса после раздела: #recipes/35 → "35"
 
 // ---------- Утилиты ----------
 
@@ -69,6 +71,9 @@ function adminError(error) {
     "your role cannot set this status": "Ваша роль не может поставить этот статус",
     "invalid status transition": "Такой переход статуса невозможен",
     "order was changed by someone else, reload it": "Заказ уже изменил другой сотрудник",
+    "an ingredient is listed twice": "Один продукт указан дважды",
+    "ingredient not found": "Продукт не найден",
+    "ingredient is used in recipes, remove it from them first": "Продукт используется в техкартах — сначала уберите его оттуда",
   };
   if (error.status === 403 && !messages[error.message]) return "Недостаточно прав";
   return messages[error.message] || error.message;
@@ -782,13 +787,16 @@ async function loadOrders() {
 let editingDish = null;
 
 async function renderDishes() {
-  let dishes, categories;
+  let dishes, categories, recipes;
   try {
-    [dishes, categories] = await Promise.all([API.get("/admin/dishes"), API.get("/categories")]);
+    [dishes, categories, recipes] = await Promise.all([
+      API.get("/admin/dishes"), API.get("/categories"), API.get("/admin/recipes"),
+    ]);
   } catch (error) {
     main.innerHTML = "<h2>Блюда</h2>" + errorBlock("Не удалось загрузить блюда", error);
     return;
   }
+  const recipeOf = new Map(recipes.map((r) => [r.dish_id, r]));
   Data.dishesCache = null;
 
   const d = editingDish || { name: "", description: "", price: "", cost_price: "", category_id: categories[0]?.id, image_url: "", is_available: true };
@@ -814,7 +822,7 @@ async function renderDishes() {
     </div>
     <div class="panel table-wrap">
       <table>
-        <thead><tr><th>Блюдо</th><th>Категория</th><th class="num">Цена</th><th class="num">Себест.</th><th class="num">Маржа</th><th>В меню</th><th></th></tr></thead>
+        <thead><tr><th>Блюдо</th><th>Категория</th><th class="num">Цена</th><th class="num">Себест.</th><th class="num">Маржа</th><th>Техкарта</th><th>В меню</th><th></th></tr></thead>
         <tbody>
           ${dishes.map((x) => `
             <tr>
@@ -823,6 +831,9 @@ async function renderDishes() {
               <td class="num">${money(x.price)}</td>
               <td class="num">${money(x.cost_price)}</td>
               <td class="num">${x.price ? Math.round(((x.price - x.cost_price) / x.price) * 100) : 0}%</td>
+              <td>${recipeOf.get(x.id)?.items
+                ? `<a class="recipe-badge ok" href="#recipes/${x.id}">✓ ${recipeOf.get(x.id).items} ${plural(recipeOf.get(x.id).items, "продукт", "продукта", "продуктов")}</a>`
+                : `<a class="recipe-badge missing" href="#recipes/${x.id}">⚠ нет техкарты</a>`}</td>
               <td><button class="switch ${x.is_available ? "on" : ""}" data-toggle="${x.id}" aria-label="Доступность" aria-pressed="${x.is_available}"></button></td>
               <td class="actions">
                 <button class="btn btn-ghost btn-sm" data-edit="${x.id}">Изменить</button>
@@ -894,6 +905,296 @@ async function renderDishes() {
       } catch (error) {
         UI.toast(adminError(error), "error");
       }
+    }
+  });
+}
+
+// ---------- Техкарты ----------
+// Техкарта = сколько каждого продукта уходит на одну порцию. От неё зависят
+// себестоимость (маржа в аналитике), списание со склада и план закупок.
+
+let recipeState = null; // { dish, lines: [{ ingredient_id, quantity }] }
+let ingredientsCache = [];
+
+// Фудкост — доля себестоимости в цене. Для ресторана норма ~25–35%.
+function foodCostBadge(cost, price) {
+  if (!price) return "";
+  const pct = (cost / price) * 100;
+  const [cls, label] = pct <= 30 ? ["ok", "норма"] : pct <= 40 ? ["low", "выше нормы"] : ["critical", "высокий"];
+  return `<span class="stock-badge ${cls}">● ${pct.toFixed(0)}% · ${label}</span>`;
+}
+
+function fmtQty(q) {
+  return String(Math.round(q * 1000) / 1000).replace(".", ",");
+}
+
+async function renderRecipes() {
+  let list;
+  try {
+    [list, ingredientsCache] = await Promise.all([API.get("/admin/recipes"), API.get("/admin/ingredients")]);
+  } catch (error) {
+    main.innerHTML = "<h2>Техкарты</h2>" + errorBlock("Не удалось загрузить техкарты", error);
+    return;
+  }
+
+  // Открыть редактор, если пришли по ссылке #recipes/35.
+  const openID = Number(routeParam);
+  if (openID && recipeState?.dish.dish_id !== openID) {
+    try {
+      const detail = await API.get(`/admin/dishes/${openID}/recipe`);
+      recipeState = {
+        dish: { ...detail, ...list.find((d) => d.dish_id === openID) },
+        lines: detail.items.map((i) => ({ ingredient_id: i.ingredient_id, quantity: i.quantity })),
+      };
+    } catch {
+      recipeState = null;
+    }
+  }
+  if (!openID) recipeState = null;
+
+  const missing = list.filter((d) => d.items === 0).length;
+  main.innerHTML = `
+    <h2>Техкарты</h2>
+    ${missing ? `<div class="note"><span>⚠️</span><span>Без техкарты: <b>${missing}</b> ${plural(missing, "блюдо", "блюда", "блюд")}.
+      Для них не считаются закупки и не списываются продукты со склада.</span></div>` : ""}
+    <div id="recipe-editor"></div>
+    <div class="panel table-wrap">
+      <table>
+        <thead><tr><th>Блюдо</th><th class="num">Цена</th><th>Техкарта</th><th class="num">Себест. по техкарте</th><th>Фудкост</th><th></th></tr></thead>
+        <tbody>
+          ${list.map((d) => `
+            <tr>
+              <td><strong>${esc(d.name)}</strong><div class="muted" style="font-size:12px">${esc(d.category)}${d.is_available ? "" : " · скрыто"}</div></td>
+              <td class="num">${money(d.price)}</td>
+              <td style="white-space:nowrap">${d.items ? `${d.items} ${plural(d.items, "продукт", "продукта", "продуктов")}` : '<span class="recipe-badge missing">⚠ нет</span>'}</td>
+              <td class="num">${d.items ? money(Math.round(d.recipe_cost)) : "—"}</td>
+              <td>${d.items ? foodCostBadge(d.recipe_cost, d.price) : ""}</td>
+              <td class="actions"><a class="btn btn-ghost btn-sm" href="#recipes/${d.dish_id}">${d.items ? "Изменить" : "Составить"}</a></td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>
+    ${role === "admin" ? '<div id="ingredient-catalogue"></div>' : ""}`;
+
+  renderRecipeEditor();
+  if (role === "admin") renderCatalogue();
+  if (recipeState) document.getElementById("recipe-editor").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function recipeTotals() {
+  let cost = 0;
+  for (const line of recipeState.lines) {
+    const ing = ingredientsCache.find((i) => i.id === line.ingredient_id);
+    if (ing && line.quantity > 0) cost += ing.price * line.quantity;
+  }
+  return Math.round(cost * 100) / 100;
+}
+
+function renderRecipeEditor() {
+  const box = document.getElementById("recipe-editor");
+  if (!box || !recipeState) return;
+  const { dish, lines } = recipeState;
+  const used = new Set(lines.map((l) => l.ingredient_id));
+
+  const options = (selected) => ingredientsCache
+    .filter((i) => i.id === selected || !used.has(i.id))
+    .map((i) => `<option value="${i.id}" ${i.id === selected ? "selected" : ""}>${esc(i.name)} — ${money(i.price)}/${esc(i.unit)}</option>`)
+    .join("");
+
+  box.innerHTML = `
+    <div class="panel recipe-editor">
+      <div class="section-head" style="margin-bottom:12px">
+        <div>
+          <h3 style="margin:0">📝 ${esc(dish.name)}</h3>
+          <p class="muted" style="font-size:14px">Цена ${money(dish.price)} · количества — на одну порцию</p>
+        </div>
+        <a class="btn btn-ghost btn-sm" href="#recipes">Закрыть</a>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Продукт</th><th class="num" style="width:170px">На порцию</th><th class="num">Стоимость</th><th></th></tr></thead>
+          <tbody id="recipe-lines">
+            ${lines.map((l, idx) => {
+              const ing = ingredientsCache.find((i) => i.id === l.ingredient_id);
+              return `
+                <tr>
+                  <td><select class="input" data-line="${idx}" data-field="ingredient">${options(l.ingredient_id)}</select></td>
+                  <td class="num"><input class="input stock-input" type="number" min="0.001" max="100" step="0.005"
+                        value="${l.quantity}" data-line="${idx}" data-field="quantity" aria-label="Количество"> ${esc(ing?.unit || "")}</td>
+                  <td class="num" data-cost="${idx}">${ing ? money(Math.round(ing.price * l.quantity)) : "—"}</td>
+                  <td class="actions"><button class="icon-btn" data-remove-line="${idx}" aria-label="Убрать">✕</button></td>
+                </tr>`;
+            }).join("") || '<tr><td colspan="4" class="muted">Добавьте продукты, из которых готовится блюдо.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin:14px 0">
+        <button class="btn btn-ghost btn-sm" id="add-line" ${used.size >= ingredientsCache.length ? "disabled" : ""}>+ Добавить продукт</button>
+      </div>
+      <div class="recipe-summary" id="recipe-summary"></div>
+      <label class="checkbox" style="margin:14px 0">
+        <input type="checkbox" id="update-cost" checked>
+        Записать себестоимость в карточку блюда (сейчас ${money(Math.round(dish.cost_price))})
+      </label>
+      <div style="display:flex;gap:10px">
+        <button class="btn" id="save-recipe">Сохранить техкарту</button>
+        <a class="btn btn-ghost" href="#recipes">Отмена</a>
+      </div>
+    </div>`;
+
+  updateRecipeSummary();
+
+  box.querySelector("#recipe-lines").addEventListener("input", (e) => {
+    const idx = Number(e.target.dataset.line);
+    if (Number.isNaN(idx)) return;
+    if (e.target.dataset.field === "quantity") {
+      recipeState.lines[idx].quantity = Number(e.target.value);
+      const ing = ingredientsCache.find((i) => i.id === recipeState.lines[idx].ingredient_id);
+      box.querySelector(`[data-cost="${idx}"]`).textContent = ing ? money(Math.round(ing.price * recipeState.lines[idx].quantity)) : "—";
+      updateRecipeSummary();
+    }
+  });
+  box.querySelector("#recipe-lines").addEventListener("change", (e) => {
+    const idx = Number(e.target.dataset.line);
+    if (e.target.dataset.field === "ingredient") {
+      recipeState.lines[idx].ingredient_id = Number(e.target.value);
+      renderRecipeEditor();
+    }
+  });
+  // Слушатель — на внутреннем блоке: он пересоздаётся при каждой перерисовке.
+  // Если повесить его на сам box (он живёт дольше), обработчики копились бы
+  // и один клик по «✕» удалял бы несколько строк.
+  box.querySelector(".recipe-editor").addEventListener("click", (e) => {
+    const remove = e.target.closest("[data-remove-line]");
+    if (remove) {
+      recipeState.lines.splice(Number(remove.dataset.removeLine), 1);
+      renderRecipeEditor();
+    }
+  });
+  box.querySelector("#add-line").addEventListener("click", () => {
+    const free = ingredientsCache.find((i) => !used.has(i.id));
+    if (!free) return;
+    recipeState.lines.push({ ingredient_id: free.id, quantity: free.unit === "шт" ? 1 : 0.1 });
+    renderRecipeEditor();
+    const selects = box.querySelectorAll('select[data-field="ingredient"]');
+    selects[selects.length - 1]?.focus();
+  });
+  box.querySelector("#save-recipe").addEventListener("click", saveRecipe);
+}
+
+// Себестоимость, фудкост и маржа пересчитываются на лету, до сохранения.
+function updateRecipeSummary() {
+  const box = document.getElementById("recipe-summary");
+  if (!box) return;
+  const { dish } = recipeState;
+  const cost = recipeTotals();
+  const margin = dish.price - cost;
+  box.innerHTML = `
+    <div><span class="muted">Себестоимость порции</span><strong>${money(Math.round(cost))}</strong></div>
+    <div><span class="muted">Маржа с порции</span><strong>${money(Math.round(margin))}</strong></div>
+    <div><span class="muted">Фудкост</span><strong>${cost ? foodCostBadge(cost, dish.price) : "—"}</strong></div>`;
+}
+
+async function saveRecipe() {
+  const { dish, lines } = recipeState;
+  const bad = lines.find((l) => !(l.quantity > 0) || l.quantity > 100);
+  if (bad) {
+    UI.toast("Количество на порцию должно быть от 0,001 до 100", "error");
+    return;
+  }
+  try {
+    const saved = await API.put(`/admin/dishes/${dish.dish_id}/recipe`, {
+      items: lines.map((l) => ({ ingredient_id: l.ingredient_id, quantity: l.quantity })),
+      update_cost: document.getElementById("update-cost").checked,
+    });
+    UI.toast(lines.length
+      ? `Техкарта «${dish.name}» сохранена · себестоимость ${money(Math.round(saved.recipe_cost))}`
+      : `Техкарта «${dish.name}» удалена`, "success");
+    recipeState = null;
+    location.hash = "#recipes";
+  } catch (error) {
+    UI.toast(adminError(error), "error");
+  }
+}
+
+// ---------- Справочник продуктов (только админ) ----------
+
+function renderCatalogue() {
+  const box = document.getElementById("ingredient-catalogue");
+  if (!box) return;
+  box.innerHTML = `
+    <div class="panel">
+      <h3>Продукты и закупочные цены</h3>
+      <p class="muted" style="font-size:14px;margin:-8px 0 14px">Цена влияет на себестоимость всех блюд с этим продуктом и на план закупок.</p>
+      <form class="inline-form" id="new-ingredient" style="margin-bottom:16px">
+        <input class="input" id="ni-name" placeholder="Новый продукт, например: Рукола" maxlength="100" required>
+        <select class="input" id="ni-unit" style="flex:0 0 90px"><option>кг</option><option>л</option><option>шт</option></select>
+        <input class="input" id="ni-price" type="number" min="0" step="10" placeholder="₸ за ед." style="flex:0 0 130px" required>
+        <input class="input" id="ni-pack" type="number" min="0.001" step="0.1" value="1" title="Упаковка" style="flex:0 0 100px">
+        <input class="input" id="ni-shelf" type="number" min="1" value="7" title="Срок хранения, дней" style="flex:0 0 100px">
+        <button class="btn" type="submit">+ Добавить</button>
+      </form>
+      <div class="table-wrap" style="max-height:420px;overflow-y:auto">
+        <table>
+          <thead><tr><th>Продукт</th><th class="num">Цена, ₸</th><th class="num">Упаковка</th><th class="num">Хранится</th><th class="num">В блюдах</th><th></th></tr></thead>
+          <tbody>
+            ${ingredientsCache.map((i) => `
+              <tr>
+                <td><strong>${esc(i.name)}</strong> <span class="muted">${esc(i.unit)}</span></td>
+                <td class="num"><input class="input stock-input" type="number" min="0" step="10" value="${i.price}" data-price="${i.id}" aria-label="Цена ${esc(i.name)}"></td>
+                <td class="num">${fmtQty(i.pack_size)} ${esc(i.unit)}</td>
+                <td class="num">${i.shelf_life_days} дн.</td>
+                <td class="num">${i.used_in}</td>
+                <td class="actions">${i.used_in ? "" : `<button class="btn btn-danger btn-sm" data-delete-ingredient="${i.id}">Удалить</button>`}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+
+  box.querySelector("#new-ingredient").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      const created = await API.post("/admin/ingredients", {
+        name: document.getElementById("ni-name").value,
+        unit: document.getElementById("ni-unit").value,
+        price: Number(document.getElementById("ni-price").value),
+        pack_size: Number(document.getElementById("ni-pack").value),
+        shelf_life_days: Number(document.getElementById("ni-shelf").value),
+      });
+      UI.toast(`Продукт «${created.name}» добавлен`, "success");
+      route();
+    } catch (error) {
+      UI.toast(error.message === "ingredient already exists" ? "Такой продукт уже есть" : adminError(error), "error");
+    }
+  });
+
+  box.addEventListener("change", async (e) => {
+    const id = Number(e.target.dataset.price);
+    if (!id) return;
+    const ing = ingredientsCache.find((i) => i.id === id);
+    const price = Number(e.target.value);
+    if (!(price >= 0)) return;
+    try {
+      await API.put(`/admin/ingredients/${id}`, {
+        name: ing.name, unit: ing.unit, price, pack_size: ing.pack_size, shelf_life_days: ing.shelf_life_days,
+      });
+      UI.toast(`Цена «${ing.name}»: ${money(price)}/${ing.unit}. Пересохраните техкарты, чтобы обновить себестоимость блюд.`, "success");
+      route();
+    } catch (error) {
+      UI.toast(adminError(error), "error");
+    }
+  });
+
+  box.addEventListener("click", async (e) => {
+    const del = e.target.closest("[data-delete-ingredient]");
+    if (!del || !confirm("Удалить продукт?")) return;
+    try {
+      await API.delete(`/admin/ingredients/${del.dataset.deleteIngredient}`);
+      UI.toast("Продукт удалён", "success");
+      route();
+    } catch (error) {
+      UI.toast(adminError(error), "error");
     }
   });
 }
@@ -1004,6 +1305,7 @@ const renderers = {
   inventory: renderInventory,
   orders: renderOrders,
   dishes: renderDishes,
+  recipes: renderRecipes,
   categories: renderCategories,
   users: renderUsers,
 };
@@ -1015,8 +1317,9 @@ function allowedSections() {
 function route() {
   clearInterval(refreshTimer);
   const allowed = allowedSections();
-  const name = location.hash.slice(1);
+  const [name, param] = location.hash.slice(1).split("/"); // "#recipes/35" → раздел и id блюда
   const section = allowed.includes(name) ? name : allowed[0];
+  routeParam = section === name ? param : undefined;
 
   document.querySelectorAll("#admin-nav a").forEach((a) =>
     a.classList.toggle("active", a.dataset.section === section));
