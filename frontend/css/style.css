@@ -1069,6 +1069,26 @@ td.actions { display: flex; gap: 8px; justify-content: flex-end; }
 .tg-text { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 2px; }
 .tg-text span { color: var(--muted); font-size: 14px; }
 
+/* ---------- Техкарты ---------- */
+
+.recipe-badge { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.recipe-badge.ok { color: var(--success); }
+.recipe-badge.missing { color: var(--warning); }
+a.recipe-badge:hover { text-decoration: underline; }
+.recipe-editor { border-color: rgba(var(--accent-rgb), 0.5); box-shadow: 0 0 0 3px var(--accent-soft); }
+.recipe-editor select.input { min-width: 240px; }
+.recipe-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.recipe-summary > div { display: flex; flex-direction: column; gap: 2px; }
+.recipe-summary span { font-size: 13px; }
+.recipe-summary strong { font-size: 20px; }
+
 /* ---------- Форма блюда ---------- */
 
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
