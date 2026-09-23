@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
 	"restaurant-management/app"
 	"restaurant-management/config"
 	"restaurant-management/database"
@@ -23,6 +25,11 @@ func main() {
 	if err := config.Load(); err != nil {
 		log.Fatal(err)
 	}
+	// Gin reads GIN_MODE when its package loads, before .env is read,
+	// so the mode from .env is applied explicitly here. "release" hides
+	// the route dump and debug warnings — use it when the site is public.
+	gin.SetMode(config.Get("GIN_MODE", gin.DebugMode))
+
 	secret, err := config.Required("JWT_SECRET")
 	if err != nil {
 		log.Fatal(err)

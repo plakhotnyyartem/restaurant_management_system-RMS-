@@ -299,9 +299,9 @@ const LOGO_LETTERS = `<path d="M783.624 171.514C801.786 171.536 816.678 177.228 
 
 function logoSvg() {
   return `
-    <svg viewBox="0 0 1216 552" aria-hidden="true" focusable="false">
+    <svg viewBox="0 0 1256 552" aria-hidden="true" focusable="false">
       <g class="logo-icon logo-spin">${LOGO_PIVOT}${LOGO_ICON}</g>
-      <g fill="currentColor" stroke="currentColor" stroke-width="1.5">${LOGO_LETTERS}</g>
+      <g transform="translate(40 0)" fill="currentColor" stroke="currentColor" stroke-width="1.5">${LOGO_LETTERS}</g>
     </svg>`;
 }
 
