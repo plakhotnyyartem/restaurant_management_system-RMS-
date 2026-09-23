@@ -77,6 +77,7 @@ func NewRouter(db *pgxpool.Pool, bot *handlers.TelegramBot) *gin.Engine {
 	router.GET("/api/dishes", dishHandler.GetDishes)
 	router.GET("/api/dishes/:id", dishHandler.GetDish)
 	router.GET("/api/dishes/:id/pairs", analyticsHandler.DishPairs)
+	router.GET("/api/bot", telegramHandler.PublicInfo)
 
 	protected := router.Group("/api")
 	protected.Use(handlers.AuthMiddleware())

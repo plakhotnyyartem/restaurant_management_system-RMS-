@@ -576,6 +576,13 @@ func TestTelegramWiring(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The public bot link for the website (no login).
+	public := call("GET", "/api/bot", "", nil)
+	expect(t, public, http.StatusOK, "public bot info")
+	if public.Body["url"] != "https://t.me/rms_test_bot" || public.Body["enabled"] != true {
+		t.Fatalf("public bot info = %v", public.Body)
+	}
+
 	// The link endpoint works when the bot is configured.
 	status := call("GET", "/api/telegram", customer, nil)
 	expect(t, status, http.StatusOK, "telegram status")
@@ -611,6 +618,13 @@ func TestTelegramDisabled(t *testing.T) {
 		t.Fatalf("enabled = %v, want false", status.Body["enabled"])
 	}
 	expect(t, request(t, "POST", "/api/telegram/link", token, nil), http.StatusServiceUnavailable, "link without a bot")
+
+	// The website hides the bot link instead of showing a dead one.
+	public := request(t, "GET", "/api/bot", "", nil)
+	expect(t, public, http.StatusOK, "public bot info without a bot")
+	if public.Body["enabled"] != false || public.Body["url"] != nil {
+		t.Fatalf("public bot info without a bot = %v", public.Body)
+	}
 }
 
 // ---------- recipes (tech cards) ----------

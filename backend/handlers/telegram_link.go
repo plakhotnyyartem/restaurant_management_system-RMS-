@@ -17,6 +17,21 @@ type TelegramHandler struct {
 	Bot *TelegramBot // nil when TELEGRAM_BOT_TOKEN is not set
 }
 
+// PublicInfo — GET /api/bot (no login): the bot's link for the website footer
+// and banners. The site asks the server instead of hard-coding the name, so a
+// renamed or disabled bot never leaves a dead link on the page.
+func (h *TelegramHandler) PublicInfo(c *gin.Context) {
+	if h.Bot == nil {
+		c.JSON(http.StatusOK, gin.H{"enabled": false})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"enabled":  true,
+		"username": h.Bot.Username,
+		"url":      "https://t.me/" + h.Bot.Username,
+	})
+}
+
 // Status — GET /api/telegram
 func (h *TelegramHandler) Status(c *gin.Context) {
 	if h.Bot == nil {
