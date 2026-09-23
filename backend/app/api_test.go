@@ -771,3 +771,18 @@ func TestRecipeEditor(t *testing.T) {
 	}
 	expect(t, request(t, "PUT", "/api/admin/dishes/99999999/recipe", admin, map[string]any{"items": []any{}}), http.StatusNotFound, "unknown dish")
 }
+
+// Website files must be revalidated, or browsers keep showing an old app.js.
+func TestFrontendIsNotCachedBlindly(t *testing.T) {
+	needDB(t)
+	for _, path := range []string{"/", "/js/app.js", "/css/style.css"} {
+		w := httptest.NewRecorder()
+		testRouter.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: got %d", path, w.Code)
+		}
+		if got := w.Header().Get("Cache-Control"); got != "no-cache" {
+			t.Fatalf("%s: Cache-Control = %q, want no-cache", path, got)
+		}
+	}
+}
