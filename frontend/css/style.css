@@ -193,12 +193,21 @@ button, input, select, textarea { font: inherit; color: inherit; }
   transition: opacity 0.2s;
 }
 .logo:hover { opacity: 0.85; }
-.logo svg { height: 44px; width: auto; display: block; }
+.logo svg { height: 52px; width: auto; display: block; }
 .logo-lg { margin-bottom: 12px; }
-.logo-lg svg { height: 52px; }
+.logo-lg svg { height: 60px; }
 .logo-icon { fill: var(--accent); stroke: var(--accent); stroke-width: 0; }
 .logo-icon path { stroke-width: 2; }
-.logo:hover .logo-icon { animation: spin-in 0.8s var(--ease); transform-box: fill-box; transform-origin: center; }
+/* Точки логотипа крутятся как индикатор загрузки: рывками по 60°,
+   и капля «перескакивает» на место следующей точки. fill-box + center —
+   вращение вокруг центра кольца, а не угла SVG. */
+.logo-spin {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: logo-spin 1.8s steps(6) infinite;
+}
+.logo:hover .logo-spin { animation-duration: 0.9s; }
+@keyframes logo-spin { to { rotate: 360deg; } }
 
 .nav { display: flex; align-items: center; gap: 4px; }
 
@@ -1357,7 +1366,6 @@ textarea.input { resize: vertical; min-height: 70px; }
 /* ---------- Анимации ---------- */
 
 @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
-@keyframes spin-in { from { rotate: -60deg; } to { rotate: 0deg; } }
 @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
 @keyframes bump { 0% { transform: scale(1); } 40% { transform: scale(1.35); } 100% { transform: scale(1); } }
 @keyframes shimmer { to { background-position: -200% 0; } }

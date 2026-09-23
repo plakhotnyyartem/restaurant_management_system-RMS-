@@ -175,6 +175,11 @@ func NewRouter(db *pgxpool.Pool, bot *handlers.TelegramBot) *gin.Engine {
 			})
 			return
 		}
+		// no-cache = "check with the server before using a cached copy".
+		// Without it browsers guess a lifetime themselves and may keep showing
+		// an old app.js for a long time after the site was updated. Unchanged
+		// files are still not re-downloaded: the server answers 304.
+		c.Header("Cache-Control", "no-cache")
 		frontend.ServeHTTP(c.Writer, c.Request)
 	})
 
@@ -184,7 +189,8 @@ func NewRouter(db *pgxpool.Pool, bot *handlers.TelegramBot) *gin.Engine {
 // frontendDir finds the frontend folder whether the server is started
 // from the repository root or from the backend folder.
 func frontendDir() string {
-	for _, dir := range []string{"frontend", "../frontend"} {
+	// repository root, backend/ (the usual `go run`), backend/app (tests)
+	for _, dir := range []string{"frontend", "../frontend", "../../frontend"} {
 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
 			return dir
 		}
