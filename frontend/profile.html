@@ -16,6 +16,7 @@
   <main class="container">
     <div class="page-title"><h1>Личный кабинет</h1></div>
     <div id="profile"></div>
+    <div id="telegram"></div>
 
     <div class="section-head" style="margin-top:8px">
       <h2>Мои заказы</h2>
@@ -101,6 +102,90 @@
         </div>`;
     }
 
+    // ---------- Telegram ----------
+
+    let telegramPoll = null;
+
+    async function loadTelegram() {
+      const box = document.getElementById("telegram");
+      let tg;
+      try {
+        tg = await API.get("/telegram");
+      } catch {
+        box.innerHTML = "";
+        return;
+      }
+      if (!tg.enabled) {
+        box.innerHTML = "";
+        return;
+      }
+      const isStaff = ["owner", "admin"].includes(Auth.user()?.role);
+
+      if (tg.linked) {
+        clearInterval(telegramPoll);
+        box.innerHTML = `
+          <div class="tg-card linked">
+            <div class="tg-icon" aria-hidden="true">✈️</div>
+            <div class="tg-text">
+              <strong>Telegram подключён${tg.username ? " · @" + esc(tg.username) : ""}</strong>
+              <span>${isStaff
+                ? "Сюда приходят статусы заказов и утренняя сводка. В боте можно спросить ИИ-ассистента."
+                : "Статусы заказов придут в " + esc(tg.bot) + " — страницу можно не держать открытой."}</span>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="tg-unlink">Отключить</button>
+          </div>`;
+        document.getElementById("tg-unlink").addEventListener("click", async () => {
+          if (!confirm("Отключить уведомления в Telegram?")) return;
+          await API.delete("/telegram/link").catch(() => {});
+          loadTelegram();
+        });
+        return;
+      }
+
+      box.innerHTML = `
+        <div class="tg-card">
+          <div class="tg-icon" aria-hidden="true">✈️</div>
+          <div class="tg-text">
+            <strong>Уведомления в Telegram</strong>
+            <span>«Заказ готовится», «Готов — можно забирать» — прямо в мессенджер.
+              ${isStaff ? "Владельцу — ещё утренняя сводка и ИИ-ассистент." : ""}</span>
+          </div>
+          <button class="btn btn-sm" id="tg-link">Подключить</button>
+        </div>`;
+
+      document.getElementById("tg-link").addEventListener("click", async (e) => {
+        const button = e.currentTarget;
+        button.disabled = true;
+        // Окно открываем сразу по клику: иначе браузер заблокирует его как всплывающее.
+        const win = window.open("about:blank", "_blank");
+        try {
+          const link = await API.post("/telegram/link");
+          if (win) win.location.href = link.url;
+          else location.href = link.url;
+          button.textContent = "Ждём подтверждения в Telegram…";
+          // Бот привяжет аккаунт, как только пользователь нажмёт «Start».
+          clearInterval(telegramPoll);
+          const started = Date.now();
+          telegramPoll = setInterval(async () => {
+            if (Date.now() - started > link.expires_in * 1000) {
+              clearInterval(telegramPoll);
+              loadTelegram();
+              return;
+            }
+            const now = await API.get("/telegram").catch(() => null);
+            if (now?.linked) {
+              UI.toast("Telegram подключён ✈️", "success");
+              loadTelegram();
+            }
+          }, 3000);
+        } catch (error) {
+          win?.close();
+          UI.toast("Не удалось создать ссылку: " + error.message, "error");
+          button.disabled = false;
+        }
+      });
+    }
+
     async function loadOrders() {
       const root = document.getElementById("orders");
       try {
@@ -137,6 +222,7 @@
     if (Auth.requireLogin()) {
       initPage("profile");
       loadProfile();
+      loadTelegram();
       loadOrders();
     }
   </script>

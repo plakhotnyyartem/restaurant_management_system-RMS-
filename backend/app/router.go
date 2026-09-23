@@ -14,9 +14,11 @@ import (
 )
 
 // NewRouter returns the router with every API route and the frontend.
-func NewRouter(db *pgxpool.Pool) *gin.Engine {
+// bot may be nil when the Telegram bot is not configured.
+func NewRouter(db *pgxpool.Pool, bot *handlers.TelegramBot) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
+	router.SetTrustedProxies(nil) // not behind a proxy: use the real client address
 
 	authHandler := &handlers.AuthHandler{
 		DB: db,
@@ -32,6 +34,16 @@ func NewRouter(db *pgxpool.Pool) *gin.Engine {
 
 	orderHandler := &handlers.OrderHandler{
 		DB: db,
+	}
+	if bot != nil {
+		// Assigned only when the bot exists: a nil *TelegramBot stored in the
+		// interface would not be == nil and would crash on the first order.
+		orderHandler.Notify = bot
+	}
+
+	telegramHandler := &handlers.TelegramHandler{
+		DB:  db,
+		Bot: bot,
 	}
 
 	analyticsHandler := &handlers.AnalyticsHandler{
@@ -72,6 +84,11 @@ func NewRouter(db *pgxpool.Pool) *gin.Engine {
 			"role":    c.MustGet("role"),
 		})
 	})
+
+	// Telegram: link the account to receive order notifications
+	protected.GET("/telegram", telegramHandler.Status)
+	protected.POST("/telegram/link", telegramHandler.CreateLink)
+	protected.DELETE("/telegram/link", telegramHandler.Unlink)
 
 	// Customer orders
 	protected.POST("/orders", orderHandler.CreateOrder)

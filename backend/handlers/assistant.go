@@ -216,28 +216,19 @@ var toolTitles = map[string]string{
 	"get_recommendations":  "рекомендации",
 }
 
-// Ask — POST /api/admin/assistant
-// The client keeps the chat history and sends it every time (the server stays stateless).
-func (h *AssistantHandler) Ask(c *gin.Context) {
-	if !h.configured() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "assistant is not configured: set ANTHROPIC_API_KEY for the server",
-		})
-		return
-	}
+var errAssistantNotConfigured = errors.New("assistant is not configured")
 
-	var req AssistantRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "messages with role user/assistant and content up to 4000 characters are required"})
-		return
-	}
-	if req.Messages[len(req.Messages)-1].Role != "user" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "the last message must be from the user"})
-		return
+const refusalReply = "Не могу помочь с этим запросом. Спросите про продажи, меню, прогноз или закупки ресторана."
+
+// answer runs the model with the tools and returns the reply text and the
+// titles of the tools it used. Shared by the web chat and the Telegram bot.
+func (h *AssistantHandler) answer(ctx context.Context, messages []assistantMessage) (string, []string, error) {
+	if !h.configured() {
+		return "", nil, errAssistantNotConfigured
 	}
 
 	var history []anthropic.BetaMessageParam
-	for _, m := range req.Messages {
+	for _, m := range messages {
 		block := anthropic.NewBetaTextBlock(m.Content)
 		if m.Role == "user" {
 			history = append(history, anthropic.NewBetaUserMessage(block))
@@ -252,11 +243,10 @@ func (h *AssistantHandler) Ask(c *gin.Context) {
 	var used []string
 	tools, err := h.tools(&used)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare assistant tools"})
-		return
+		return "", nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(c, 3*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
 	today := time.Now().Format("02.01.2006")
@@ -280,26 +270,10 @@ func (h *AssistantHandler) Ask(c *gin.Context) {
 
 	message, err := runner.RunToCompletion(ctx)
 	if err != nil {
-		var apiErr *anthropic.Error
-		switch {
-		case errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusUnauthorized:
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "assistant API key is invalid"})
-		case errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusTooManyRequests:
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": "assistant is busy, try again in a minute"})
-		case errors.Is(err, context.DeadlineExceeded):
-			c.JSON(http.StatusGatewayTimeout, gin.H{"error": "assistant took too long to answer"})
-		default:
-			c.JSON(http.StatusBadGateway, gin.H{"error": "assistant request failed"})
-		}
-		return
+		return "", nil, err
 	}
-
 	if message.StopReason == anthropic.BetaStopReasonRefusal {
-		c.JSON(http.StatusOK, gin.H{
-			"reply": "Не могу помочь с этим запросом. Спросите про продажи, меню, прогноз или закупки ресторана.",
-			"tools": []string{},
-		})
-		return
+		return refusalReply, []string{}, nil
 	}
 
 	var reply strings.Builder
@@ -321,9 +295,50 @@ func (h *AssistantHandler) Ask(c *gin.Context) {
 			titles = append(titles, toolTitles[name])
 		}
 	}
+	return strings.TrimSpace(reply.String()), titles, nil
+}
 
-	c.JSON(http.StatusOK, gin.H{
-		"reply": strings.TrimSpace(reply.String()),
-		"tools": titles,
-	})
+// assistantErrorStatus turns an API error into a short human message (for any client).
+func assistantErrorStatus(err error) (int, string) {
+	var apiErr *anthropic.Error
+	switch {
+	case errors.Is(err, errAssistantNotConfigured):
+		return http.StatusServiceUnavailable, "assistant is not configured: set ANTHROPIC_API_KEY for the server"
+	case errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusUnauthorized:
+		return http.StatusServiceUnavailable, "assistant API key is invalid"
+	case errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusTooManyRequests:
+		return http.StatusTooManyRequests, "assistant is busy, try again in a minute"
+	case errors.Is(err, context.DeadlineExceeded):
+		return http.StatusGatewayTimeout, "assistant took too long to answer"
+	default:
+		return http.StatusBadGateway, "assistant request failed"
+	}
+}
+
+// Ask — POST /api/admin/assistant
+// The client keeps the chat history and sends it every time (the server stays stateless).
+func (h *AssistantHandler) Ask(c *gin.Context) {
+	if !h.configured() {
+		code, msg := assistantErrorStatus(errAssistantNotConfigured)
+		c.JSON(code, gin.H{"error": msg})
+		return
+	}
+
+	var req AssistantRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "messages with role user/assistant and content up to 4000 characters are required"})
+		return
+	}
+	if req.Messages[len(req.Messages)-1].Role != "user" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "the last message must be from the user"})
+		return
+	}
+
+	reply, titles, err := h.answer(c, req.Messages)
+	if err != nil {
+		code, msg := assistantErrorStatus(err)
+		c.JSON(code, gin.H{"error": msg})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"reply": reply, "tools": titles})
 }

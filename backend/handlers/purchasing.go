@@ -103,22 +103,19 @@ type inventoryRow struct {
 	Status     string   `json:"status"`     // ok | low | critical | unused
 }
 
-// GetInventory — GET /api/admin/inventory
-func (h *InventoryHandler) GetInventory(c *gin.Context) {
-	ingredients, err := h.loadIngredients(c)
+// inventory returns every ingredient with its stock, weekly need and status.
+func (h *InventoryHandler) inventory(ctx context.Context) ([]inventoryRow, error) {
+	ingredients, err := h.loadIngredients(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load inventory"})
-		return
+		return nil, err
 	}
-	recipes, err := h.loadRecipes(c)
+	recipes, err := h.loadRecipes(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load recipes"})
-		return
+		return nil, err
 	}
-	demand, _, err := h.forecastDemand(c)
+	demand, _, err := h.forecastDemand(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build forecast"})
-		return
+		return nil, err
 	}
 	need := weeklyNeed(recipes, demand)
 
@@ -138,6 +135,16 @@ func (h *InventoryHandler) GetInventory(c *gin.Context) {
 			}
 		}
 		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+// GetInventory — GET /api/admin/inventory
+func (h *InventoryHandler) GetInventory(c *gin.Context) {
+	rows, err := h.inventory(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load inventory"})
+		return
 	}
 	c.JSON(http.StatusOK, rows)
 }

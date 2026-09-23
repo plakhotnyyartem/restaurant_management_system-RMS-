@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"restaurant-management/config"
 	"restaurant-management/database"
 	"restaurant-management/handlers"
+	"restaurant-management/telegram"
 )
 
 const testSecret = "test-secret-for-integration-tests-0123456789"
@@ -50,7 +52,7 @@ func TestMain(m *testing.M) {
 		skipReason = "database is not available: " + err.Error()
 	} else {
 		testDB = db
-		testRouter = NewRouter(db)
+		testRouter = NewRouter(db, nil)
 	}
 	code := m.Run()
 	if testDB != nil {
@@ -498,4 +500,115 @@ func TestOrderLifecycleAndStockWriteOff(t *testing.T) {
 	expect(t, set(cook, "ready"), http.StatusOK, "cook marks ready")
 	expect(t, set(waiter, "completed"), http.StatusOK, "waiter hands it over")
 	expect(t, set(admin, "cancelled"), http.StatusConflict, "cancel a completed order")
+}
+
+// ---------- Telegram wiring ----------
+
+// TestTelegramWiring: with a bot, an order placed through the HTTP API reaches
+// the kitchen chat, and status changes reach the linked customer.
+func TestTelegramWiring(t *testing.T) {
+	needDB(t)
+	ctx := context.Background()
+	var migrated bool
+	testDB.QueryRow(ctx, `SELECT to_regclass('telegram_links') IS NOT NULL`).Scan(&migrated)
+	if !migrated {
+		t.Skip("run migration 003_telegram.sql first")
+	}
+
+	// A fake api.telegram.org that remembers who got which text.
+	var mu sync.Mutex
+	sent := map[int64][]string{}
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p struct {
+			ChatID int64  `json:"chat_id"`
+			Text   string `json:"text"`
+		}
+		json.NewDecoder(r.Body).Decode(&p)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/getMe"):
+			fmt.Fprint(w, `{"ok":true,"result":{"id":1,"username":"rms_test_bot"}}`)
+		case strings.HasSuffix(r.URL.Path, "/sendMessage"):
+			mu.Lock()
+			sent[p.ChatID] = append(sent[p.ChatID], p.Text)
+			mu.Unlock()
+			fmt.Fprint(w, `{"ok":true,"result":{}}`)
+		default:
+			fmt.Fprint(w, `{"ok":true,"result":true}`)
+		}
+	}))
+	defer fake.Close()
+
+	bot := handlers.NewTelegramBot(testDB, telegram.NewClient("TEST:TOKEN", fake.URL), 9)
+	if err := bot.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(testDB, bot)
+	call := func(method, path, token string, body any) response {
+		data, _ := json.Marshal(body)
+		req := httptest.NewRequest(method, path, bytes.NewReader(data))
+		req.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		res := response{Code: w.Code, Raw: w.Body.String()}
+		json.Unmarshal(w.Body.Bytes(), &res.Body)
+		return res
+	}
+
+	// Kitchen chat and a linked customer (bot settings are restored afterwards).
+	var savedKitchen string
+	hadKitchen := testDB.QueryRow(ctx, `SELECT value FROM bot_settings WHERE key = 'kitchen_chat'`).Scan(&savedKitchen) == nil
+	t.Cleanup(func() {
+		if hadKitchen {
+			testDB.Exec(ctx, `UPDATE bot_settings SET value = $1 WHERE key = 'kitchen_chat'`, savedKitchen)
+		} else {
+			testDB.Exec(ctx, `DELETE FROM bot_settings WHERE key = 'kitchen_chat'`)
+		}
+	})
+	const kitchen, customerTG = int64(-424242), int64(8_800_555_35_35)
+	testDB.Exec(ctx, `INSERT INTO bot_settings (key, value) VALUES ('kitchen_chat', $1)
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, fmt.Sprint(kitchen))
+
+	customerID, customer := createUser(t, "customer")
+	_, waiter := createUser(t, "waiter")
+	testDB.Exec(ctx, `DELETE FROM telegram_links WHERE telegram_id = $1`, customerTG)
+	if _, err := testDB.Exec(ctx, `INSERT INTO telegram_links (user_id, telegram_id) VALUES ($1, $2)`, customerID, customerTG); err != nil {
+		t.Fatal(err)
+	}
+
+	// The link endpoint works when the bot is configured.
+	status := call("GET", "/api/telegram", customer, nil)
+	expect(t, status, http.StatusOK, "telegram status")
+	if status.Body["linked"] != true || status.Body["bot"] != "@rms_test_bot" {
+		t.Fatalf("status = %v", status.Body)
+	}
+
+	dishID, _, _ := dishByName(t, "Пепперони")
+	order := call("POST", "/api/orders", customer, map[string]any{"items": []map[string]any{{"dish_id": dishID, "quantity": 1}}})
+	expect(t, order, http.StatusCreated, "create order")
+	id := int(order.Body["id"].(float64))
+	expect(t, call("PUT", fmt.Sprintf("/api/admin/orders/%d/status", id), waiter, map[string]string{"status": "confirmed"}), http.StatusOK, "confirm")
+	bot.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := fmt.Sprintf("#%d", id)
+	if k := strings.Join(sent[kitchen], "\n"); !strings.Contains(k, "Новый заказ "+want) || !strings.Contains(k, "В работу: "+want) {
+		t.Fatalf("kitchen chat got: %q", k)
+	}
+	if c := strings.Join(sent[customerTG], "\n"); !strings.Contains(c, want) || !strings.Contains(c, "принят") {
+		t.Fatalf("customer got: %q", c)
+	}
+}
+
+// Without a bot the Telegram endpoints report "disabled" instead of failing.
+func TestTelegramDisabled(t *testing.T) {
+	needDB(t)
+	_, token := createUser(t, "customer")
+	status := request(t, "GET", "/api/telegram", token, nil)
+	expect(t, status, http.StatusOK, "status")
+	if status.Body["enabled"] != false {
+		t.Fatalf("enabled = %v, want false", status.Body["enabled"])
+	}
+	expect(t, request(t, "POST", "/api/telegram/link", token, nil), http.StatusServiceUnavailable, "link without a bot")
 }

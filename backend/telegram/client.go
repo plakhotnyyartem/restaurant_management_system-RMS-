@@ -135,6 +135,11 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, html string) err
 	}, nil)
 }
 
+// SendTyping shows "typing…" in the chat while a slow answer is being prepared.
+func (c *Client) SendTyping(ctx context.Context, chatID int64) error {
+	return c.call(ctx, "sendChatAction", map[string]any{"chat_id": chatID, "action": "typing"}, nil)
+}
+
 // SetCommands fills the command menu shown next to the input field.
 func (c *Client) SetCommands(ctx context.Context, commands map[string]string, order []string) error {
 	list := make([]map[string]string, 0, len(order))
