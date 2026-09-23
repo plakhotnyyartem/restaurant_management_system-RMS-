@@ -1042,6 +1042,33 @@ td.actions { display: flex; gap: 8px; justify-content: flex-end; }
 .chat-form { display: flex; gap: 10px; padding: 14px; border-top: 1px solid var(--border); background: var(--surface); }
 .chat-form textarea { flex: 1; resize: none; min-height: 46px; max-height: 160px; }
 
+/* ---------- Telegram в личном кабинете ---------- */
+
+.tg-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px;
+  margin: -12px 0 32px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.12), transparent 60%), var(--surface);
+  border: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.tg-card.linked { background: var(--surface); }
+.tg-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  background: var(--accent-soft);
+  flex-shrink: 0;
+}
+.tg-text { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 2px; }
+.tg-text span { color: var(--muted); font-size: 14px; }
+
 /* ---------- Форма блюда ---------- */
 
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }

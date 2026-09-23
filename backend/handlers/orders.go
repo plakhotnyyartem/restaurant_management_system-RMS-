@@ -13,6 +13,16 @@ import (
 
 type OrderHandler struct {
 	DB *pgxpool.Pool
+
+	// Notify receives order events (the Telegram bot). nil = nobody is notified.
+	Notify OrderNotifier
+}
+
+// OrderNotifier is told about order events after they are saved.
+// Implementations must return quickly (send in the background).
+type OrderNotifier interface {
+	OrderCreated(orderID int)
+	OrderStatusChanged(orderID int, status string)
 }
 
 type OrderItem struct {
@@ -228,6 +238,10 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 		return
 	}
 
+	if h.Notify != nil {
+		h.Notify.OrderCreated(orderID)
+	}
+
 	orders, err := h.loadOrders(c, orderSelect+`WHERE o.id = $1`, orderID)
 	if err != nil || len(orders) == 0 {
 		c.JSON(http.StatusCreated, gin.H{"id": orderID, "total_price": total, "status": "pending"})
@@ -296,6 +310,9 @@ func (h *OrderHandler) CancelMyOrder(c *gin.Context) {
 	if tag.RowsAffected() == 0 {
 		c.JSON(http.StatusConflict, gin.H{"error": "only your pending orders can be cancelled"})
 		return
+	}
+	if h.Notify != nil {
+		h.Notify.OrderStatusChanged(id, "cancelled")
 	}
 	c.JSON(http.StatusOK, gin.H{"id": id, "status": "cancelled"})
 }
@@ -416,6 +433,9 @@ func (h *OrderHandler) UpdateStatus(c *gin.Context) {
 	if err := tx.Commit(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update order"})
 		return
+	}
+	if h.Notify != nil {
+		h.Notify.OrderStatusChanged(id, req.Status)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
