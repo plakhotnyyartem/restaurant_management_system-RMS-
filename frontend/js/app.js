@@ -386,6 +386,7 @@ const UI = {
           <p>📍 Алматы, пр. Абая, 10</p>
           <p>📞 +7 (700) 000-00-00</p>
           <p>✉️ hello@rms.kz</p>
+          <p id="footer-telegram" hidden></p>
         </div>
         <div>
           <h4>Часы работы</h4>
@@ -393,6 +394,14 @@ const UI = {
           <p>Пт–Вс: 11:00 – 01:00</p>
         </div>
       </div>`;
+
+    // Ссылка на бота появляется, только если бот запущен на сервере.
+    TelegramBot.info().then((bot) => {
+      const line = document.getElementById("footer-telegram");
+      if (!bot || !line) return;
+      line.innerHTML = `✈️ <a class="tg-link" href="${esc(bot.url)}" target="_blank" rel="noopener">@${esc(bot.username)}</a> — бот в Telegram`;
+      line.hidden = false;
+    });
   },
 
   updateCartBadge(animate) {
@@ -467,6 +476,22 @@ document.addEventListener("click", (event) => {
   Cart.add(entry.dish, entry.emoji);
   UI.toast(`${entry.dish.name} добавлен в корзину`, "success");
 });
+
+// ---------- Telegram-бот ----------
+// Имя бота сайт узнаёт у сервера (GET /api/bot), а не хранит в коде:
+// если бот переименуют или выключат, на странице не останется битой ссылки.
+
+const TelegramBot = {
+  promise: null,
+  info() {
+    if (!this.promise) {
+      this.promise = API.get("/bot")
+        .then((bot) => (bot?.enabled ? bot : null))
+        .catch(() => null);
+    }
+    return this.promise;
+  },
+};
 
 // ---------- Тема: светлая / тёмная ----------
 // Выбор хранится в localStorage (удобство одного пользователя). Если выбора нет —

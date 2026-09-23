@@ -75,6 +75,22 @@
       </div>
     </section>
 
+    <section class="section" id="telegram-promo" hidden>
+      <div class="container">
+        <div class="tg-promo" data-reveal>
+          <div class="tg-promo-icon" aria-hidden="true">✈️</div>
+          <div class="tg-promo-text">
+            <h2>Следите за заказом в Telegram</h2>
+            <p>«Готовится», «Готов — можно забирать» — бот напишет сам. А ещё там меню и история заказов.</p>
+          </div>
+          <div class="tg-promo-actions">
+            <a class="btn" id="tg-promo-open" target="_blank" rel="noopener">Открыть @бота</a>
+            <a class="btn btn-ghost" href="profile.html">Подключить уведомления</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="section" data-reveal>
       <div class="container">
         <div class="section-head"><h2>Почему мы</h2></div>
@@ -104,6 +120,16 @@
   <script src="js/app.js"></script>
   <script>
     initPage("home");
+
+    // Баннер бота показываем, только если бот запущен на сервере.
+    TelegramBot.info().then((bot) => {
+      if (!bot) return;
+      const open = document.getElementById("tg-promo-open");
+      open.href = bot.url;
+      open.textContent = "Открыть @" + bot.username;
+      document.getElementById("telegram-promo").hidden = false;
+      initReveal(); // баннер стал видимым — подключаем к нему анимацию появления
+    });
 
     (async () => {
       const [categories, dishes] = await Promise.all([Data.categories(), Data.dishes()]);
