@@ -253,10 +253,10 @@ function heatmap(container, cells) {
 // ---------- Матрица инженерии меню ----------
 
 const CLASS_INFO = {
-  star: { icon: "⭐", name: "Звёзды", hint: "популярные и выгодные" },
-  plowhorse: { icon: "🐴", name: "Рабочие лошадки", hint: "популярные, маржа ниже средней" },
-  puzzle: { icon: "❓", name: "Загадки", hint: "выгодные, но редко заказывают" },
-  dog: { icon: "🐶", name: "Собаки", hint: "мало продаж и низкая маржа" },
+  star: { name: "Звёзды", hint: "популярные и выгодные" },
+  plowhorse: { name: "Рабочие лошадки", hint: "популярные, маржа ниже средней" },
+  puzzle: { name: "Загадки", hint: "выгодные, но редко заказывают" },
+  dog: { name: "Собаки", hint: "мало продаж и низкая маржа" },
 };
 
 function menuMatrix(container, report) {
@@ -296,7 +296,7 @@ function menuMatrix(container, report) {
 
   const corner = (cls, qx, qy, anchor) => {
     const info = CLASS_INFO[cls];
-    svgText(svg, qx, qy, info.icon + " " + info.name, { class: "quadrant-label", "text-anchor": anchor });
+    svgText(svg, qx, qy, info.name, { class: "quadrant-label", "text-anchor": anchor });
   };
   corner("puzzle", m.left + 8, m.top + 14, "start");
   corner("star", m.left + w - 8, m.top + 14, "end");
@@ -325,7 +325,7 @@ function menuMatrix(container, report) {
     const show = (event) => {
       g.classList.add("active");
       const pos = event?.clientX ? pointerIn(container, event) : { x: cx, y: cy };
-      tooltip.show(pos.x, pos.y, CLASS_INFO[d.class].icon + " " + d.name, [
+      tooltip.show(pos.x, pos.y, d.name, [
         { value: d.popularity + "%", label: "доля продаж" },
         { value: money(d.unit_margin), label: "маржа с порции" },
         { value: d.quantity + " шт", label: "продано" },

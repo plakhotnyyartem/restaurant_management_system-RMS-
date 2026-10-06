@@ -6,9 +6,9 @@
   <title>Меню — RMS</title>
   <link rel="icon" href="img/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script>try{var t=localStorage.getItem("rm_theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
-  <link rel="stylesheet" href="css/style.css?v=20260923-logo7">
+  <link rel="stylesheet" href="css/style.css?v=20261006-corp">
 </head>
 <body>
   <header id="site-header"></header>
@@ -16,7 +16,7 @@
   <main class="container">
     <div class="page-title">
       <h1>Меню</h1>
-      <p>Категории → блюда → корзина</p>
+      <p>Выберите категорию или найдите блюдо по названию</p>
     </div>
 
     <div class="toolbar">
@@ -34,7 +34,7 @@
 
   <footer id="site-footer"></footer>
 
-  <script src="js/app.js?v=20260923-logo7"></script>
+  <script src="js/app.js?v=20261006-corp"></script>
   <script>
     initPage("menu");
 
@@ -49,7 +49,7 @@
       const all = [{ id: 0, name: "Все" }, ...state.categories];
       document.getElementById("category-chips").innerHTML = all.map((c) => `
         <button class="chip ${c.id === state.category ? "active" : ""}" data-cat="${c.id}">
-          ${c.id ? (CATEGORY_EMOJI[c.name] || "🍽️") + " " : ""}${esc(c.name)}
+          ${esc(c.name)}
         </button>`).join("");
     }
 
@@ -62,9 +62,8 @@
 
       const grid = document.getElementById("dishes");
       grid.innerHTML = list.length
-        ? list.map((d, i) => UI.dishCard(d, state.categories, i)).join("")
+        ? list.map((d) => UI.dishCard(d, state.categories)).join("")
         : `<div class="empty" style="grid-column:1/-1">
-             <div class="big">🤷</div>
              <h3>Ничего не нашлось</h3>
              <p>Попробуйте другую категорию или запрос.</p>
            </div>`;

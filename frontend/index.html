@@ -6,49 +6,39 @@
   <title>RMS — ресторан</title>
   <link rel="icon" href="img/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script>try{var t=localStorage.getItem("rm_theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
-  <link rel="stylesheet" href="css/style.css?v=20260923-logo7">
+  <link rel="stylesheet" href="css/style.css?v=20261006-corp">
 </head>
 <body>
   <header id="site-header"></header>
 
   <main>
     <section class="hero">
-      <div class="aurora" aria-hidden="true"></div>
       <div class="container hero-inner">
         <div>
-          <span class="eyebrow">🔥 Готовим на живом огне</span>
-          <h1>Вкусно, быстро<br>и <span class="accent">без очередей</span></h1>
-          <p class="lead">Выберите блюдо, оформите заказ в пару кликов и следите за его статусом — от кухни до вашего стола.</p>
+          <span class="eyebrow">Ресторан в Алматы</span>
+          <h1>Пицца, суши и бургеры с заказом онлайн</h1>
+          <p class="lead">Выберите блюда, оформите заказ в пару кликов и следите за статусом: принят, готовится, готов к выдаче.</p>
           <div class="hero-actions">
-            <a href="menu.html" class="btn">Смотреть меню →</a>
-            <a href="#popular" class="btn btn-ghost">Популярное</a>
+            <a href="menu.html" class="btn">Смотреть меню</a>
+            <a href="#popular" class="btn btn-ghost">Популярные блюда</a>
           </div>
-          <div class="hero-stats" data-reveal>
-            <div><strong data-count="20" data-suffix="+">0</strong><span>блюд в меню</span></div>
-            <div><strong data-count="15" data-suffix=" мин">0</strong><span>среднее время готовки</span></div>
-            <div><strong data-count="4.9" data-suffix=" ★">0</strong><span>оценка гостей</span></div>
+          <div class="hero-facts">
+            <div><strong id="dish-count">21</strong><span>блюдо в меню</span></div>
+            <div><strong id="category-count">6</strong><span>категорий</span></div>
+            <div><strong>11:00</strong><span>открываемся каждый день</span></div>
           </div>
         </div>
-        <div class="hero-plate" aria-hidden="true">
-          🍕
-          <!-- Шесть блюд по кругу — как шесть точек логотипа RMS -->
-          <div class="orbit-ring">
-            <span class="orbit" style="--a:0deg"><span>🍣</span></span>
-            <span class="orbit" style="--a:60deg"><span>🍹</span></span>
-            <span class="orbit" style="--a:120deg"><span>🍔</span></span>
-            <span class="orbit" style="--a:180deg"><span>🥗</span></span>
-            <span class="orbit" style="--a:240deg"><span>🍰</span></span>
-            <span class="orbit" style="--a:300deg"><span>☕</span></span>
-          </div>
+        <div class="hero-gallery">
+          <img src="img/dishes/pepperoni.jpg" alt="Пицца пепперони">
+          <img src="img/dishes/philadelphia.jpg" alt="Роллы Филадельфия">
+          <img src="img/dishes/cheeseburger.jpg" alt="Чизбургер">
         </div>
       </div>
     </section>
 
-    <div class="marquee" aria-hidden="true"><div class="marquee-track" id="marquee"></div></div>
-
-    <section class="section" data-reveal>
+    <section class="section">
       <div class="container">
         <div class="section-head">
           <div>
@@ -60,14 +50,14 @@
       </div>
     </section>
 
-    <section class="section" id="popular" data-reveal>
+    <section class="section" id="popular">
       <div class="container">
         <div class="section-head">
           <div>
             <h2>Популярные блюда</h2>
             <p>То, что гости заказывают чаще всего</p>
           </div>
-          <a href="menu.html" class="btn btn-ghost btn-sm">Всё меню →</a>
+          <a href="menu.html" class="btn btn-ghost btn-sm">Всё меню</a>
         </div>
         <div class="dish-grid" id="popular-dishes">
           <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
@@ -77,38 +67,34 @@
 
     <section class="section" id="telegram-promo" hidden>
       <div class="container">
-        <div class="tg-promo" data-reveal>
-          <div class="tg-promo-icon" aria-hidden="true">✈️</div>
+        <div class="tg-promo">
           <div class="tg-promo-text">
-            <h2>Следите за заказом в Telegram</h2>
-            <p>«Готовится», «Готов — можно забирать» — бот напишет сам. А ещё там меню и история заказов.</p>
+            <h2>Статус заказа в Telegram</h2>
+            <p>Бот напишет, когда заказ начнут готовить и когда его можно забирать. Там же меню и история заказов.</p>
           </div>
           <div class="tg-promo-actions">
-            <a class="btn" id="tg-promo-open" target="_blank" rel="noopener">Открыть @бота</a>
+            <a class="btn" id="tg-promo-open" target="_blank" rel="noopener">Открыть бота</a>
             <a class="btn btn-ghost" href="profile.html">Подключить уведомления</a>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="section" data-reveal>
+    <section class="section">
       <div class="container">
-        <div class="section-head"><h2>Почему мы</h2></div>
+        <div class="section-head"><h2>Как мы работаем</h2></div>
         <div class="features">
           <div class="feature">
-            <div class="icon">⚡</div>
-            <h3>Быстрый заказ</h3>
-            <p>Корзина, оформление и оплата — без звонков и ожидания официанта.</p>
+            <h3>Заказ онлайн</h3>
+            <p>Корзина и оформление на сайте — без звонков и ожидания официанта.</p>
           </div>
           <div class="feature">
-            <div class="icon">📍</div>
             <h3>Статус в реальном времени</h3>
             <p>Видно, когда заказ принят, готовится и готов к выдаче.</p>
           </div>
           <div class="feature">
-            <div class="icon">🥬</div>
             <h3>Свежие продукты</h3>
-            <p>Закупки каждый день — и скоро с умным прогнозом спроса.</p>
+            <p>Закупаем по прогнозу спроса, поэтому продукты не залёживаются на складе.</p>
           </div>
         </div>
       </div>
@@ -117,7 +103,7 @@
 
   <footer id="site-footer"></footer>
 
-  <script src="js/app.js?v=20260923-logo7"></script>
+  <script src="js/app.js?v=20261006-corp"></script>
   <script>
     initPage("home");
 
@@ -128,39 +114,35 @@
       open.href = bot.url;
       open.textContent = "Открыть @" + bot.username;
       document.getElementById("telegram-promo").hidden = false;
-      initReveal(); // баннер стал видимым — подключаем к нему анимацию появления
     });
 
     (async () => {
       const [categories, dishes] = await Promise.all([Data.categories(), Data.dishes()]);
 
+      // Плитка категории — с фото первого блюда этой категории.
       document.getElementById("categories").innerHTML = categories.map((c) => {
-        const count = dishes.filter((d) => d.category_id === c.id).length;
+        const inCategory = dishes.filter((d) => d.category_id === c.id);
+        const cover = inCategory.find((d) => d.image_url);
         return `
           <a class="category-tile" href="menu.html?cat=${c.id}">
-            <span class="emoji">${CATEGORY_EMOJI[c.name] || "🍽️"}</span>
-            <strong>${esc(c.name)}</strong>
-            <span>${count} ${plural(count, "блюдо", "блюда", "блюд")}</span>
+            <div class="thumb">${cover ? `<img src="${esc(cover.image_url)}" alt="" loading="lazy">` : ""}</div>
+            <div class="body">
+              <strong>${esc(c.name)}</strong>
+              <span>${inCategory.length} ${plural(inCategory.length, "блюдо", "блюда", "блюд")}</span>
+            </div>
           </a>`;
       }).join("");
 
-      // Бегущая строка из реального меню; список повторён дважды для бесшовной прокрутки.
-      const items = dishes.filter((d) => d.is_available).map((d) =>
-        `<span>${dishEmoji(d, categories)} <b>${esc(d.name)}</b> ${money(d.price)}</span>`).join("");
-      document.getElementById("marquee").innerHTML = items + items;
-
-      // Настоящее число блюд в меню для счётчика в hero.
-      const counter = document.querySelector('[data-count="20"]');
-      if (counter) {
-        counter.dataset.count = String(dishes.length);
-        if (counter.closest(".revealed")) countUp(counter); // счётчик уже успел запуститься
-      }
+      // Настоящие числа из меню.
+      document.getElementById("dish-count").textContent = dishes.length;
+      document.querySelector("#dish-count + span").textContent = plural(dishes.length, "блюдо", "блюда", "блюд") + " в меню";
+      document.getElementById("category-count").textContent = categories.length;
+      document.querySelector("#category-count + span").textContent = plural(categories.length, "категория", "категории", "категорий");
 
       // «Популярные» — пока просто первые доступные блюда.
-      // Позже здесь будет выборка из аналитики заказов (Big Data-модуль).
       const popular = dishes.filter((d) => d.is_available).slice(0, 4);
       document.getElementById("popular-dishes").innerHTML =
-        popular.map((d, i) => UI.dishCard(d, categories, i)).join("");
+        popular.map((d) => UI.dishCard(d, categories)).join("");
     })();
   </script>
 </body>
