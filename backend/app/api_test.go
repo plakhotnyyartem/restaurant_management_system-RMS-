@@ -350,6 +350,20 @@ func TestOrderPriceComesFromDatabase(t *testing.T) {
 	}
 }
 
+// The cart shows the "six seven" easter egg only when the server says the
+// order costs exactly 67 ₸, so the sauce alone must come back as 67.
+func TestSauceOrderCosts67(t *testing.T) {
+	needDB(t)
+	dishID, _, _ := dishByName(t, "Соус 67")
+	_, customer := createUser(t, "customer")
+
+	res := createOrder(t, customer, map[string]any{"dish_id": dishID, "quantity": 1})
+	expect(t, res, http.StatusCreated, "order the sauce")
+	if total := res.Body["total_price"].(float64); total != 67 {
+		t.Fatalf("total = %v, want exactly 67", total)
+	}
+}
+
 func TestOrderValidation(t *testing.T) {
 	needDB(t)
 	_, category := func() (int, int) { id, _, c := dishByName(t, "Пепперони"); return id, c }()

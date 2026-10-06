@@ -31,6 +31,9 @@ psql "postgres://postgres:postgres@localhost:5432/restaurant_management" \
 # Telegram-бот
 psql "postgres://postgres:postgres@localhost:5432/restaurant_management" \
      -f backend/database/migrations/003_telegram.sql
+# «Соус 67» (пасхалка: заказ ровно на 67 ₸ показывает анимацию «six seven»)
+psql "postgres://postgres:postgres@localhost:5432/restaurant_management" \
+     -f backend/database/migrations/004_sauce.sql
 
 # 2. Демо-данные: меню, сотрудники, 250 клиентов, ~15 000 заказов за 180 дней,
 #    37 продуктов, техкарты всех блюд и начальные остатки склада.

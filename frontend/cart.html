@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script>try{var t=localStorage.getItem("rm_theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
-  <link rel="stylesheet" href="css/style.css?v=20261006-corp">
+  <link rel="stylesheet" href="css/style.css?v=20261006-67">
 </head>
 <body>
   <header id="site-header"></header>
@@ -22,7 +22,7 @@
 
   <footer id="site-footer"></footer>
 
-  <script src="js/app.js?v=20261006-corp"></script>
+  <script src="js/app.js?v=20261006-67"></script>
   <script>
     initPage("cart");
 
@@ -114,6 +114,8 @@
         const order = await API.post("/orders", body);
         Cart.clear();
         UI.toast(`Заказ #${order?.id ?? ""} оформлен!`, "success");
+        // Пасхалка: сумму берём из ответа сервера, а не из корзины.
+        if (Number(order?.total_price) === 67) await playSixSeven();
         setTimeout(() => (location.href = "profile.html"), 900);
       } catch (error) {
         if (API.isMissing(error)) {
@@ -124,6 +126,39 @@
         button.disabled = false;
         button.textContent = "Оформить заказ";
       }
+    }
+
+    // «Six seven»: 6 и 7 качаются, как руки-весы из мема. Длится ~4,5 с,
+    // клик или Esc закрывают раньше. Промис разрешается, когда оверлей исчез.
+    function playSixSeven() {
+      return new Promise((resolve) => {
+        const overlay = document.createElement("div");
+        overlay.className = "six-seven";
+        overlay.setAttribute("role", "status");
+        overlay.innerHTML = `
+          <div class="ss-stage">
+            <div class="ss-nums" aria-hidden="true">
+              <div class="ss-num"><span>6</span><span class="hand">🫴</span></div>
+              <div class="ss-num"><span>7</span><span class="hand">🫴</span></div>
+            </div>
+            <div class="ss-title">six seven</div>
+            <p class="ss-note">Заказ на 67 ₸ оформлен. Нажмите, чтобы продолжить</p>
+          </div>`;
+        document.body.appendChild(overlay);
+
+        let done = false;
+        const close = () => {
+          if (done) return;
+          done = true;
+          document.removeEventListener("keydown", onKey);
+          overlay.classList.add("out");
+          setTimeout(() => { overlay.remove(); resolve(); }, 300);
+        };
+        const onKey = (e) => { if (e.key === "Escape" || e.key === "Enter") close(); };
+        overlay.addEventListener("click", close);
+        document.addEventListener("keydown", onKey);
+        setTimeout(close, 4500);
+      });
     }
 
     render();
