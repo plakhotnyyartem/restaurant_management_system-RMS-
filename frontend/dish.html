@@ -6,9 +6,9 @@
   <title>Блюдо — RMS</title>
   <link rel="icon" href="img/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script>try{var t=localStorage.getItem("rm_theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
-  <link rel="stylesheet" href="css/style.css?v=20260923-logo7">
+  <link rel="stylesheet" href="css/style.css?v=20261006-corp">
 </head>
 <body>
   <header id="site-header"></header>
@@ -19,7 +19,7 @@
     <section class="section" id="recommend-section" hidden>
       <div class="section-head">
         <div>
-          <h2>🔥 Возможно, вам понравится</h2>
+          <h2>С этим блюдом берут</h2>
           <p id="recommend-hint">Часто заказывают вместе</p>
         </div>
       </div>
@@ -29,7 +29,7 @@
 
   <footer id="site-footer"></footer>
 
-  <script src="js/app.js?v=20260923-logo7"></script>
+  <script src="js/app.js?v=20261006-corp"></script>
   <script>
     initPage("menu");
 
@@ -42,21 +42,19 @@
       if (!dish) {
         root.innerHTML = `
           <div class="empty" style="margin:40px 0">
-            <div class="big">🍽️</div>
             <h3>Блюдо не найдено</h3>
             <a href="menu.html" class="btn">Вернуться в меню</a>
           </div>`;
         return;
       }
 
-      const emoji = dishEmoji(dish, categories);
       document.title = dish.name + " — RMS";
 
       root.innerHTML = `
         ${Data.demo ? `<div style="margin-top:24px">${UI.demoNote()}</div>` : ""}
         <div class="dish-page">
           <div class="dish-media">
-            ${dish.image_url ? `<img src="${esc(dish.image_url)}" alt="${esc(dish.name)}">` : `<span class="emoji">${emoji}</span>`}
+            ${UI.dishPhoto(dish, categories, false)}
           </div>
           <div class="dish-info">
             <div class="cat">${esc(categoryName(categories, dish.category_id))}</div>
@@ -85,8 +83,8 @@
       });
 
       document.getElementById("add").addEventListener("click", () => {
-        Cart.add(dish, emoji, quantity);
-        UI.toast(`${dish.name} ×${quantity} — в корзине`, "success");
+        Cart.add(dish, quantity);
+        UI.toast(`${dish.name} ×${quantity} добавлен в корзину`, "success");
       });
 
       // «С этим берут»: ассоциативные правила из реальной истории заказов
@@ -112,7 +110,7 @@
             `${Math.round(reason[picks[0].id])}% гостей, заказавших «${dish.name}», берут и «${picks[0].name}»`;
         }
         if (picks.length) {
-          document.getElementById("recommend").innerHTML = picks.map((d, i) => UI.dishCard(d, categories, i)).join("");
+          document.getElementById("recommend").innerHTML = picks.map((d) => UI.dishCard(d, categories)).join("");
           document.getElementById("recommend-section").hidden = false;
         }
       } catch {}

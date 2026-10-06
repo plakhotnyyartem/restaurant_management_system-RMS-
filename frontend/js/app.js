@@ -145,16 +145,6 @@ const API = {
 // Используются, пока на бэкенде нет Dishes API (RM-6).
 // Как только появится GET /api/dishes — фронт сам переключится на реальные данные.
 
-const CATEGORY_EMOJI = {
-  "Пицца": "🍕",
-  "Суши": "🍣",
-  "Бургеры": "🍔",
-  "Напитки": "🥤",
-  "Салаты": "🥗",
-  "Десерты": "🍰",
-  "Супы": "🍲",
-};
-
 const DEMO_CATEGORIES = [
   { id: 1, name: "Пицца" },
   { id: 2, name: "Суши" },
@@ -163,29 +153,29 @@ const DEMO_CATEGORIES = [
 ];
 
 const DEMO_DISHES = [
-  { id: 1, name: "Пепперони", category_id: 1, price: 3200, emoji: "🍕", is_available: true,
+  { id: 1, name: "Пепперони", category_id: 1, price: 3200, is_available: true,
     description: "Томатный соус, моцарелла и острая пепперони на тонком тесте из дровяной печи." },
-  { id: 2, name: "Маргарита", category_id: 1, price: 2600, emoji: "🍕", is_available: true,
+  { id: 2, name: "Маргарита", category_id: 1, price: 2600, is_available: true,
     description: "Классика: томаты, моцарелла, свежий базилик и оливковое масло." },
-  { id: 3, name: "Четыре сыра", category_id: 1, price: 3500, emoji: "🧀", is_available: true,
+  { id: 3, name: "Четыре сыра", category_id: 1, price: 3500, is_available: true,
     description: "Моцарелла, горгонзола, пармезан и чеддер на сливочном соусе." },
-  { id: 4, name: "Филадельфия", category_id: 2, price: 3900, emoji: "🍣", is_available: true,
+  { id: 4, name: "Филадельфия", category_id: 2, price: 3900, is_available: true,
     description: "Лосось, сливочный сыр, огурец и рис. 8 штук." },
-  { id: 5, name: "Калифорния", category_id: 2, price: 3400, emoji: "🍱", is_available: true,
+  { id: 5, name: "Калифорния", category_id: 2, price: 3400, is_available: true,
     description: "Краб, авокадо, огурец и икра масаго. 8 штук." },
-  { id: 6, name: "Дракон", category_id: 2, price: 4200, emoji: "🐉", is_available: false,
+  { id: 6, name: "Дракон", category_id: 2, price: 4200, is_available: false,
     description: "Угорь, авокадо, сливочный сыр и соус унаги." },
-  { id: 7, name: "Чизбургер", category_id: 3, price: 2400, emoji: "🍔", is_available: true,
+  { id: 7, name: "Чизбургер", category_id: 3, price: 2400, is_available: true,
     description: "Говяжья котлета, чеддер, маринованные огурцы и фирменный соус." },
-  { id: 8, name: "Бургер BBQ", category_id: 3, price: 2900, emoji: "🍔", is_available: true,
+  { id: 8, name: "Бургер BBQ", category_id: 3, price: 2900, is_available: true,
     description: "Двойная котлета, бекон, луковые кольца и соус барбекю." },
-  { id: 9, name: "Картофель фри", category_id: 3, price: 900, emoji: "🍟", is_available: true,
+  { id: 9, name: "Картофель фри", category_id: 3, price: 900, is_available: true,
     description: "Хрустящий картофель с морской солью. Подаётся с соусом на выбор." },
-  { id: 10, name: "Мохито", category_id: 4, price: 1200, emoji: "🍹", is_available: true,
+  { id: 10, name: "Мохито", category_id: 4, price: 1200, is_available: true,
     description: "Безалкогольный: лайм, мята, тростниковый сахар и содовая." },
-  { id: 11, name: "Лимонад манго", category_id: 4, price: 1100, emoji: "🥭", is_available: true,
+  { id: 11, name: "Лимонад манго", category_id: 4, price: 1100, is_available: true,
     description: "Домашний лимонад из пюре манго и маракуйи." },
-  { id: 12, name: "Капучино", category_id: 4, price: 900, emoji: "☕", is_available: true,
+  { id: 12, name: "Капучино", category_id: 4, price: 900, is_available: true,
     description: "Двойной эспрессо и нежная молочная пенка." },
 ];
 
@@ -240,10 +230,6 @@ function categoryName(categories, id) {
   return categories.find((c) => c.id === id)?.name || "";
 }
 
-function dishEmoji(dish, categories) {
-  return dish.emoji || CATEGORY_EMOJI[categoryName(categories, dish.category_id)] || "🍽️";
-}
-
 // ---------- Корзина ----------
 
 const Cart = {
@@ -254,13 +240,14 @@ const Cart = {
     store.set("rm_cart", items);
     UI.updateCartBadge(true);
   },
-  add(dish, emoji, quantity = 1) {
+  add(dish, quantity = 1) {
     const items = this.items();
     const existing = items.find((i) => i.id === dish.id);
     if (existing) {
       existing.quantity += quantity;
+      existing.image = dish.image_url || existing.image || "";
     } else {
-      items.push({ id: dish.id, name: dish.name, price: dish.price, emoji, quantity });
+      items.push({ id: dish.id, name: dish.name, price: dish.price, image: dish.image_url || "", quantity });
     }
     this.save(items);
   },
@@ -316,7 +303,7 @@ const UI = {
       { href: "menu.html", key: "menu", label: "Меню" },
       { href: "cart.html", key: "cart", label: 'Корзина<span class="cart-badge" id="cart-badge">0</span>' },
       user
-        ? { href: "profile.html", key: "profile", label: "👤 " + esc(user.name) }
+        ? { href: "profile.html", key: "profile", label: esc(user.name) }
         : { href: "login.html", key: "login", label: "Войти" },
     ];
     const panelLabel = { admin: "Админка", owner: "Аналитика", waiter: "Заказы", cook: "Кухня" }[user?.role];
@@ -349,7 +336,7 @@ const UI = {
       </div>`;
 
     header.querySelector(".theme-toggle").addEventListener("click", (event) => {
-      Theme.toggle(event.currentTarget);
+      Theme.toggle();
     });
 
     const burger = header.querySelector(".burger");
@@ -374,9 +361,9 @@ const UI = {
         </div>
         <div>
           <h4>Контакты</h4>
-          <p>📍 Алматы, пр. Абая, 10</p>
-          <p>📞 +7 (700) 000-00-00</p>
-          <p>✉️ hello@rms.kz</p>
+          <p>Алматы, пр. Абая, 10</p>
+          <p>+7 (700) 000-00-00</p>
+          <p>hello@rms.kz</p>
           <p id="footer-telegram" hidden></p>
         </div>
         <div>
@@ -390,7 +377,7 @@ const UI = {
     TelegramBot.info().then((bot) => {
       const line = document.getElementById("footer-telegram");
       if (!bot || !line) return;
-      line.innerHTML = `✈️ <a class="tg-link" href="${esc(bot.url)}" target="_blank" rel="noopener">@${esc(bot.username)}</a> — бот в Telegram`;
+      line.innerHTML = `Telegram: <a class="tg-link" href="${esc(bot.url)}" target="_blank" rel="noopener">@${esc(bot.username)}</a>`;
       line.hidden = false;
     });
   },
@@ -425,15 +412,19 @@ const UI = {
     }, 3200);
   },
 
-  dishCard(dish, categories, index = 0) {
-    const emoji = dishEmoji(dish, categories);
-    this.dishIndex.set(dish.id, { dish, emoji });
+  // Фото блюда или нейтральная заглушка с названием категории.
+  dishPhoto(dish, categories, lazy = true) {
+    return dish.image_url
+      ? `<img src="${esc(dish.image_url)}" alt="${esc(dish.name)}"${lazy ? ' loading="lazy"' : ""}>`
+      : `<span class="dish-ph">${esc(categoryName(categories, dish.category_id) || "Фото скоро")}</span>`;
+  },
+
+  dishCard(dish, categories) {
+    this.dishIndex.set(dish.id, dish);
     return `
-      <article class="dish-card" style="animation-delay:${Math.min(index, 12) * 40}ms">
+      <article class="dish-card">
         <a href="dish.html?id=${dish.id}" class="dish-media">
-          ${dish.image_url
-            ? `<img src="${esc(dish.image_url)}" alt="${esc(dish.name)}" loading="lazy">`
-            : `<span class="emoji">${emoji}</span>`}
+          ${this.dishPhoto(dish, categories)}
           ${dish.is_available ? "" : '<span class="tag off">Нет в наличии</span>'}
         </a>
         <div class="dish-body">
@@ -462,10 +453,10 @@ const UI = {
 document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-add]");
   if (!button) return;
-  const entry = UI.dishIndex.get(Number(button.dataset.add));
-  if (!entry) return;
-  Cart.add(entry.dish, entry.emoji);
-  UI.toast(`${entry.dish.name} добавлен в корзину`, "success");
+  const dish = UI.dishIndex.get(Number(button.dataset.add));
+  if (!dish) return;
+  Cart.add(dish);
+  UI.toast(`${dish.name} добавлен в корзину`, "success");
 });
 
 // ---------- Telegram-бот ----------
@@ -485,15 +476,12 @@ const TelegramBot = {
 };
 
 // ---------- Тема: светлая / тёмная ----------
-// Выбор хранится в localStorage (удобство одного пользователя). Если выбора нет —
-// тема берётся из настроек системы через CSS @media (prefers-color-scheme).
-// Атрибут data-theme ставится ещё в <head> каждой страницы, чтобы не было «вспышки».
+// По умолчанию светлая. Выбор тёмной хранится в localStorage (удобство одного
+// пользователя); атрибут data-theme ставится ещё в <head>, чтобы не было «вспышки».
 
 const Theme = {
   current() {
-    const chosen = document.documentElement.dataset.theme;
-    if (chosen === "light" || chosen === "dark") return chosen;
-    return matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
   },
   apply(theme) {
     document.documentElement.dataset.theme = theme;
@@ -501,84 +489,16 @@ const Theme = {
     // Графики рисуются в SVG с цветами под тему — сообщаем, что их пора перерисовать.
     window.dispatchEvent(new CustomEvent("themechange", { detail: theme }));
   },
-  toggle(button) {
+  toggle() {
     const next = this.current() === "dark" ? "light" : "dark";
-    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-    // Новая тема «раскрывается» кругом из кнопки (View Transitions API).
-    if (document.startViewTransition && !reduce) {
-      const box = button.getBoundingClientRect();
-      const x = box.left + box.width / 2;
-      const y = box.top + box.height / 2;
-      const r = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
-      const root = document.documentElement.style;
-      root.setProperty("--vt-x", x + "px");
-      root.setProperty("--vt-y", y + "px");
-      root.setProperty("--vt-r", r + "px");
-      document.startViewTransition(() => this.apply(next));
-      return;
-    }
-
-    // Запасной путь: плавный переход цветов.
     document.documentElement.classList.add("theme-fade");
     this.apply(next);
-    setTimeout(() => document.documentElement.classList.remove("theme-fade"), 400);
+    setTimeout(() => document.documentElement.classList.remove("theme-fade"), 300);
   },
 };
-
-// ---------- Живые эффекты ----------
-
-// Секции с data-reveal плавно появляются, когда доходят до экрана.
-function initReveal() {
-  const items = document.querySelectorAll("[data-reveal]:not(.revealed)");
-  if (!("IntersectionObserver" in window)) {
-    items.forEach((el) => el.classList.add("revealed"));
-    return;
-  }
-  const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (!entry.isIntersecting) continue;
-      entry.target.classList.add("revealed");
-      entry.target.querySelectorAll("[data-count]").forEach(countUp);
-      observer.unobserve(entry.target);
-    }
-  }, { threshold: 0.15 });
-  items.forEach((el) => observer.observe(el));
-}
-
-// Число «набегает» от 0 до значения из data-count.
-function countUp(el) {
-  const target = Number(el.dataset.count);
-  const suffix = el.dataset.suffix || "";
-  const decimals = (el.dataset.count.split(".")[1] || "").length;
-  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (reduce) {
-    el.textContent = target.toFixed(decimals) + suffix;
-    return;
-  }
-  const start = performance.now();
-  const duration = 1200;
-  const step = (now) => {
-    const t = Math.min((now - start) / duration, 1);
-    const eased = 1 - Math.pow(1 - t, 3);
-    el.textContent = (target * eased).toFixed(decimals).replace(".", ",") + suffix;
-    if (t < 1) requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
-}
-
-// Подсветка карточки следует за курсором: координаты передаём в CSS-переменные.
-document.addEventListener("pointermove", (event) => {
-  const card = event.target.closest?.(".dish-card, .category-tile, .feature");
-  if (!card) return;
-  const box = card.getBoundingClientRect();
-  card.style.setProperty("--mx", event.clientX - box.left + "px");
-  card.style.setProperty("--my", event.clientY - box.top + "px");
-});
 
 // Общая инициализация страницы.
 function initPage(active) {
   UI.renderHeader(active);
   UI.renderFooter();
-  initReveal();
 }

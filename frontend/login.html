@@ -6,16 +6,16 @@
   <title>Вход — RMS</title>
   <link rel="icon" href="img/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script>try{var t=localStorage.getItem("rm_theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
-  <link rel="stylesheet" href="css/style.css?v=20260923-logo7">
+  <link rel="stylesheet" href="css/style.css?v=20261006-corp">
 </head>
 <body>
   <header id="site-header"></header>
 
   <main class="auth-wrap">
     <div class="auth-card">
-      <h1 id="title">С возвращением 👋</h1>
+      <h1 id="title">Вход в аккаунт</h1>
       <p id="subtitle">Войдите, чтобы оформлять заказы и следить за ними.</p>
 
       <div class="tabs">
@@ -42,7 +42,7 @@
     </div>
   </main>
 
-  <script src="js/app.js?v=20260923-logo7"></script>
+  <script src="js/app.js?v=20261006-corp"></script>
   <script>
     initPage("login");
 
@@ -57,8 +57,8 @@
     if (Auth.isLoggedIn()) location.replace(next);
 
     const texts = {
-      login: { title: "С возвращением 👋", subtitle: "Войдите, чтобы оформлять заказы и следить за ними.", submit: "Войти" },
-      register: { title: "Создать аккаунт ✨", subtitle: "Регистрация займёт полминуты.", submit: "Зарегистрироваться" },
+      login: { title: "Вход в аккаунт", subtitle: "Войдите, чтобы оформлять заказы и следить за ними.", submit: "Войти" },
+      register: { title: "Регистрация", subtitle: "Регистрация займёт полминуты.", submit: "Зарегистрироваться" },
     };
 
     document.querySelector(".tabs").addEventListener("click", (e) => {

@@ -7,17 +7,17 @@
 const main = document.getElementById("section");
 
 const SECTIONS = {
-  dashboard: { icon: "📊", title: "Dashboard", roles: ["admin", "owner"] },
-  assistant: { icon: "🤖", title: "ИИ-ассистент", roles: ["admin", "owner"] },
-  analytics: { icon: "🧠", title: "Аналитика", roles: ["admin", "owner"] },
-  forecast: { icon: "🔮", title: "Прогноз", roles: ["admin", "owner"] },
-  purchasing: { icon: "🛒", title: "Закупки", roles: ["admin", "owner"] },
-  inventory: { icon: "📦", title: "Склад", roles: ["admin", "owner", "cook"] },
-  orders: { icon: "🧾", title: "Заказы", roles: ["admin", "waiter", "cook"] },
-  dishes: { icon: "🍕", title: "Блюда", roles: ["admin"] },
-  recipes: { icon: "📝", title: "Техкарты", roles: ["admin", "cook"] },
-  categories: { icon: "🗂️", title: "Категории", roles: ["admin"] },
-  users: { icon: "👥", title: "Пользователи", roles: ["admin"] },
+  dashboard: { title: "Dashboard", roles: ["admin", "owner"] },
+  assistant: { title: "ИИ-ассистент", roles: ["admin", "owner"] },
+  analytics: { title: "Аналитика", roles: ["admin", "owner"] },
+  forecast: { title: "Прогноз", roles: ["admin", "owner"] },
+  purchasing: { title: "Закупки", roles: ["admin", "owner"] },
+  inventory: { title: "Склад", roles: ["admin", "owner", "cook"] },
+  orders: { title: "Заказы", roles: ["admin", "waiter", "cook"] },
+  dishes: { title: "Блюда", roles: ["admin"] },
+  recipes: { title: "Техкарты", roles: ["admin", "cook"] },
+  categories: { title: "Категории", roles: ["admin"] },
+  users: { title: "Пользователи", roles: ["admin"] },
 };
 
 const STATUS_LABEL = {
@@ -105,7 +105,7 @@ async function renderDashboard() {
       </div>
       <div class="panel">
         <div class="section-head" style="margin-bottom:14px">
-          <h3 style="margin:0">🧠 Главное на сегодня</h3>
+          <h3 style="margin:0">Главное на сегодня</h3>
           <a href="#analytics" class="btn btn-ghost btn-sm">Вся аналитика →</a>
         </div>
         <div class="recs">${recs.items.slice(0, 3).map(recCard).join("") || '<p class="muted">Пока недостаточно данных.</p>'}</div>
@@ -197,7 +197,7 @@ async function loadAnalytics() {
     </div>
 
     <div class="panel">
-      <h3>🧠 Что сделать — рекомендации системы</h3>
+      <h3>Рекомендации системы</h3>
       <p class="muted" style="font-size:14px;margin:-8px 0 14px">Сформированы автоматически из инженерии меню, анализа корзин, нагрузки и динамики выручки.</p>
       <div class="recs">${recs.items.map(recCard).join("") || '<p class="muted">Недостаточно данных за период.</p>'}</div>
     </div>
@@ -221,7 +221,7 @@ async function loadAnalytics() {
             ${menu.dishes.map((d) => `
               <tr>
                 <td><strong>${esc(d.name)}</strong><div class="muted" style="font-size:12px">${esc(d.category)}</div></td>
-                <td>${d.class ? `<span class="class-badge">${CLASS_INFO[d.class].icon} ${CLASS_INFO[d.class].name}</span>` : "—"}</td>
+                <td>${d.class ? `<span class="class-badge">${CLASS_INFO[d.class].name}</span>` : "—"}</td>
                 <td class="num">${d.quantity.toLocaleString("ru-RU")}</td>
                 <td class="num">${d.popularity}%</td>
                 <td class="num">${money(d.unit_margin)}</td>
@@ -448,7 +448,7 @@ async function loadPlan() {
 
     <div class="panel">
       <div class="section-head" style="margin-bottom:14px">
-        <h3 style="margin:0">🛒 Список закупки — ${toBuy.length} позиций</h3>
+        <h3 style="margin:0">Список закупки — ${toBuy.length} позиций</h3>
         ${role === "admin" && toBuy.length ? '<button class="btn btn-sm" id="plan-apply">Оприходовать поставку</button>' : ""}
       </div>
       <div class="table-wrap">
@@ -615,7 +615,7 @@ function renderAnswer(text) {
 function chatMessageHtml(m) {
   if (m.role === "user") return `<div class="msg user">${esc(m.content)}</div>`;
   const sources = m.tools?.length
-    ? `<div class="msg-sources">📊 Данные: ${m.tools.map((t) => `<span>${esc(t)}</span>`).join("")}</div>`
+    ? `<div class="msg-sources">Данные: ${m.tools.map((t) => `<span>${esc(t)}</span>`).join("")}</div>`
     : "";
   return `<div class="msg bot ${m.error ? "error" : ""}">${renderAnswer(m.content)}${sources}</div>`;
 }
@@ -760,7 +760,7 @@ function ticket(o) {
         <span class="status ${o.status}">${STATUS_LABEL[o.status]}</span>
       </div>
       <ul>${o.items.map((i) => `<li><span>${esc(i.name)}</span><span>×${i.quantity}</span></li>`).join("")}</ul>
-      <div class="meta"><span>👤 ${esc(o.user_name)}</span><span>${ago}</span></div>
+      <div class="meta"><span>${esc(o.user_name)}</span><span>${ago}</span></div>
       <div class="meta"><span>Сумма</span><strong style="color:var(--text)">${money(o.total_price)}</strong></div>
       ${actions.length ? `<div class="actions">${actions.map((a) =>
         `<button class="btn btn-sm ${a.danger ? "btn-danger" : ""}" data-order="${o.id}" data-to="${a.to}">${a.label}</button>`).join("")}</div>` : ""}
@@ -1005,7 +1005,7 @@ function renderRecipeEditor() {
     <div class="panel recipe-editor">
       <div class="section-head" style="margin-bottom:12px">
         <div>
-          <h3 style="margin:0">📝 ${esc(dish.name)}</h3>
+          <h3 style="margin:0">Техкарта: ${esc(dish.name)}</h3>
           <p class="muted" style="font-size:14px">Цена ${money(dish.price)} · количества — на одну порцию</p>
         </div>
         <a class="btn btn-ghost btn-sm" href="#recipes">Закрыть</a>
@@ -1362,7 +1362,7 @@ if (Auth.requireLogin()) {
     const roleTitle = { admin: "АДМИНИСТРАТОР", owner: "ВЛАДЕЛЕЦ", waiter: "ОФИЦИАНТ", cook: "ПОВАР" }[role];
     document.getElementById("admin-nav").innerHTML =
       `<div class="side-title">${roleTitle}</div>` +
-      allowed.map((key) => `<a href="#${key}" data-section="${key}">${SECTIONS[key].icon} ${SECTIONS[key].title}</a>`).join("");
+      allowed.map((key) => `<a href="#${key}" data-section="${key}">${SECTIONS[key].title}</a>`).join("");
     window.addEventListener("hashchange", route);
     route();
   }

@@ -6,9 +6,9 @@
   <title>Корзина — RMS</title>
   <link rel="icon" href="img/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script>try{var t=localStorage.getItem("rm_theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
-  <link rel="stylesheet" href="css/style.css?v=20260923-logo7">
+  <link rel="stylesheet" href="css/style.css?v=20261006-corp">
 </head>
 <body>
   <header id="site-header"></header>
@@ -22,11 +22,13 @@
 
   <footer id="site-footer"></footer>
 
-  <script src="js/app.js?v=20260923-logo7"></script>
+  <script src="js/app.js?v=20261006-corp"></script>
   <script>
     initPage("cart");
 
     const root = document.getElementById("cart");
+    // Фото берём из меню: в корзинах, собранных до появления фото, их нет.
+    let photos = new Map();
 
     function render() {
       const items = Cart.items();
@@ -34,7 +36,6 @@
       if (!items.length) {
         root.innerHTML = `
           <div class="empty" style="margin:24px 0 60px">
-            <div class="big">🛒</div>
             <h3>Корзина пуста</h3>
             <p>Добавьте что-нибудь вкусное из меню.</p>
             <a href="menu.html" class="btn">Перейти в меню</a>
@@ -47,7 +48,9 @@
           <div class="cart-list">
             ${items.map((i) => `
               <div class="cart-row">
-                <div class="thumb">${i.emoji || "🍽️"}</div>
+                <a class="thumb" href="dish.html?id=${i.id}">${photos.get(i.id) || i.image
+                  ? `<img src="${esc(photos.get(i.id) || i.image)}" alt="${esc(i.name)}">`
+                  : esc(i.name.charAt(0))}</a>
                 <div>
                   <div class="name">${esc(i.name)}</div>
                   <div class="unit">${money(i.price)}</div>
@@ -124,6 +127,10 @@
     }
 
     render();
+    Data.dishes().then((dishes) => {
+      photos = new Map(dishes.filter((d) => d.image_url).map((d) => [d.id, d.image_url]));
+      render();
+    }).catch(() => {});
   </script>
 </body>
 </html>

@@ -72,6 +72,31 @@ var menu = []menuItem{
 	{"Капучино", "Напитки", 900, 200, 0, "Двойной эспрессо и нежная молочная пенка."},
 }
 
+// dishPhotos are free Unsplash photos stored in frontend/img/dishes
+// (paths are relative to the site root, like every frontend link).
+var dishPhotos = map[string]string{
+	"Пепперони":     "img/dishes/pepperoni.jpg",
+	"Маргарита":     "img/dishes/margherita.jpg",
+	"Четыре сыра":   "img/dishes/four-cheese.jpg",
+	"Барбекю":       "img/dishes/bbq-pizza.jpg",
+	"Филадельфия":   "img/dishes/philadelphia.jpg",
+	"Калифорния":    "img/dishes/california.jpg",
+	"Дракон":        "img/dishes/dragon.jpg",
+	"Ролл с угрём":  "img/dishes/eel-roll.jpg",
+	"Чизбургер":     "img/dishes/cheeseburger.jpg",
+	"Бургер BBQ":    "img/dishes/bbq-burger.jpg",
+	"Наггетсы":      "img/dishes/nuggets.jpg",
+	"Картофель фри": "img/dishes/fries.jpg",
+	"Цезарь":        "img/dishes/caesar.jpg",
+	"Греческий":     "img/dishes/greek.jpg",
+	"Чизкейк":       "img/dishes/cheesecake.jpg",
+	"Тирамису":      "img/dishes/tiramisu.jpg",
+	"Кока-кола":     "img/dishes/cola.jpg",
+	"Мохито":        "img/dishes/mojito.jpg",
+	"Лимонад манго": "img/dishes/mango-lemonade.jpg",
+	"Капучино":      "img/dishes/cappuccino.jpg",
+}
+
 // ---------- Hidden patterns ----------
 
 // Orders per weekday relative to average (index = time.Weekday, 0 = Sunday).
@@ -211,6 +236,11 @@ func ensureMenu(ctx context.Context, db *pgxpool.Pool) (map[string]dishInfo, err
 		case err == nil:
 			m.Price = price // orders use the real current price
 			_, err = db.Exec(ctx, `UPDATE dishes SET cost_price = $1 WHERE id = $2 AND cost_price = 0`, m.Cost, id)
+		}
+		if err == nil {
+			// Photo only fills an empty slot: a photo set by the admin is kept.
+			_, err = db.Exec(ctx, `UPDATE dishes SET image_url = $1 WHERE id = $2 AND COALESCE(image_url, '') = ''`,
+				dishPhotos[m.Name], id)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("dish %s: %w", m.Name, err)

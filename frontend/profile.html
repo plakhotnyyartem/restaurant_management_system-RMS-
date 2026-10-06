@@ -6,9 +6,9 @@
   <title>Личный кабинет — RMS</title>
   <link rel="icon" href="img/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script>try{var t=localStorage.getItem("rm_theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
-  <link rel="stylesheet" href="css/style.css?v=20260923-logo7">
+  <link rel="stylesheet" href="css/style.css?v=20261006-corp">
 </head>
 <body>
   <header id="site-header"></header>
@@ -26,7 +26,7 @@
 
   <footer id="site-footer"></footer>
 
-  <script src="js/app.js?v=20260923-logo7"></script>
+  <script src="js/app.js?v=20261006-corp"></script>
   <script>
     const STATUS_FLOW = ["pending", "confirmed", "preparing", "ready", "completed"];
     const STATUS_LABEL = {
@@ -174,7 +174,7 @@
             }
             const now = await API.get("/telegram").catch(() => null);
             if (now?.linked) {
-              UI.toast("Telegram подключён ✈️", "success");
+              UI.toast("Telegram подключён", "success");
               loadTelegram();
             }
           }, 3000);
@@ -192,7 +192,7 @@
         const orders = await API.get("/orders");
         root.innerHTML = orders.length
           ? orders.map(orderCard).join("")
-          : `<div class="empty"><div class="big">🧾</div><h3>Заказов пока нет</h3>
+          : `<div class="empty"><h3>Заказов пока нет</h3>
                <a href="menu.html" class="btn">Сделать первый заказ</a></div>`;
       } catch (error) {
         root.innerHTML = API.isMissing(error)
