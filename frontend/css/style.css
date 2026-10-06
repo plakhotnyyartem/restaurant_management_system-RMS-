@@ -299,7 +299,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .category-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 16px;
 }
 .category-tile {
@@ -1184,6 +1184,51 @@ textarea.input { resize: vertical; min-height: 70px; }
 
 /* Смена темы — короткое плавное перетекание цветов */
 .theme-fade, .theme-fade * { transition: background-color 0.25s, color 0.25s, border-color 0.25s, fill 0.25s !important; }
+
+/* ---------- Пасхалка «six seven» (заказ ровно на 67 ₸) ---------- */
+
+.six-seven {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(10, 12, 16, 0.9);
+  color: #ffffff;
+  text-align: center;
+  cursor: pointer;
+  animation: ss-in 0.25s ease both;
+}
+.six-seven.out { animation: ss-out 0.3s ease forwards; }
+.ss-stage { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.ss-nums {
+  display: flex;
+  gap: clamp(32px, 8vw, 120px);
+  font-size: clamp(120px, 26vw, 320px);
+  font-weight: 800;
+  line-height: 1;
+}
+.ss-num { display: flex; flex-direction: column; align-items: center; animation: ss-weigh 0.55s ease-in-out infinite alternate; }
+.ss-num:first-child { color: #5dade2; }
+.ss-num:last-child { animation-direction: alternate-reverse; }
+.ss-num .hand { font-size: 0.3em; margin-top: -0.1em; display: inline-block; }
+.ss-num:first-child .hand { transform: scaleX(-1); } /* две ладони смотрят друг на друга */
+.ss-title {
+  font-size: clamp(28px, 6vw, 64px);
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  animation: ss-pulse 0.55s ease-in-out infinite alternate;
+}
+.ss-note { color: #b8c0cc; font-size: 15px; }
+@keyframes ss-weigh {
+  from { transform: translateY(-10%) rotate(-5deg); }
+  to { transform: translateY(10%) rotate(5deg); }
+}
+@keyframes ss-pulse { from { transform: scale(1); } to { transform: scale(1.08); } }
+@keyframes ss-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ss-out { to { opacity: 0; } }
 
 /* ---------- Анимации ---------- */
 
