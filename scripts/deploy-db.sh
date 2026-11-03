@@ -1,49 +1,48 @@
 #!/bin/bash
-# Готовит базу на хостинге (например, Neon): схема, все миграции, демо-данные
-# и ваш аккаунт администратора.
+# Подготовка облачной базы (Neon и любой PostgreSQL):
+#   1) все миграции по порядку, 2) часовой пояс Алматы,
+#   3) демо-данные, 4) случайные пароли демо-сотрудникам (сайт будет публичным),
+#   5) по желанию — сделать ваш аккаунт админом.
+# Строка подключения вводится скрыто и никуда не сохраняется.
 #
 #   bash scripts/deploy-db.sh
-#
-# Строка подключения и пароль вводятся скрыто и никуда не сохраняются.
-# Повторный запуск безопасен: миграции идемпотентны, сид не дублирует заказы.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-read -r -s -p "Строка подключения к базе (postgresql://...): " DB_URL; echo
-[[ "$DB_URL" == postgres* ]] || { echo "Это не похоже на строку подключения PostgreSQL"; exit 1; }
+read -r -s -p "Строка подключения к облачной базе (postgresql://…): " DB_URL; echo
+case "$DB_URL" in
+  postgres://*|postgresql://*) ;;
+  *) echo "Это не похоже на строку подключения PostgreSQL"; exit 1 ;;
+esac
+if [ "$DB_URL" = "$(grep '^DATABASE_URL=' backend/.env 2>/dev/null | cut -d= -f2-)" ]; then
+  echo "Это строка от локальной базы, а нужна облачная"; exit 1
+fi
 
 echo "→ Миграции"
 for f in backend/database/migrations/0*.sql; do
-  echo "   $(basename "$f")"
-  psql "$DB_URL" -q -v ON_ERROR_STOP=1 -f "$f" 2>&1 | grep -v NOTICE || true
+  echo "  ${f##*/}"
+  psql "$DB_URL" -q -v ON_ERROR_STOP=1 -f "$f" 2>&1 | grep -v "NOTICE\|already exists" || true
 done
-# Время заказов и аналитика по часам — по Алматы
-psql "$DB_URL" -q -v ON_ERROR_STOP=1 -c "ALTER DATABASE \"$(psql "$DB_URL" -Atc 'select current_database()')\" SET timezone = 'Asia/Almaty'"
 
-echo "→ Демо-данные (меню, 250 клиентов, ~15 000 заказов, склад)"
-(cd backend && DATABASE_URL="$DB_URL" go run ./cmd/seed)
+echo "→ Часовой пояс базы: Asia/Almaty (как у сервера)"
+psql "$DB_URL" -q -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN EXECUTE format('ALTER DATABASE %I SET timezone = %L', current_database(), 'Asia/Almaty'); END \$\$;"
 
-# Демо-сотрудники создаются с паролем password123 — на публичном сайте его
-# нужно сменить на случайный, иначе войти под владельцем сможет любой.
-psql "$DB_URL" -q -v ON_ERROR_STOP=1 <<'SQL'
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-UPDATE users SET password_hash = crypt(gen_random_uuid()::text, gen_salt('bf', 10))
-WHERE email IN ('waiter@rms.kz', 'cook@rms.kz', 'owner@rms.kz');
+echo "→ Демо-данные (меню, клиенты, ~15 000 заказов, склад)"
+(cd backend && DATABASE_URL="$DB_URL" go run ./cmd/seed | sed 's/(пароль password123)/(пароль заменён ниже)/')
+
+echo "→ Случайные пароли демо-сотрудникам: сайт публичный, password123 оставлять нельзя"
+psql "$DB_URL" -q -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pgcrypto" \
+  -c "UPDATE users SET password_hash = crypt(encode(gen_random_bytes(18), 'base64'), gen_salt('bf', 10))
+      WHERE email IN ('waiter@rms.kz', 'cook@rms.kz', 'owner@rms.kz')"
+
+echo
+read -r -p "Email, который сделать админом (сначала зарегистрируйтесь на сайте; Enter — пропустить): " ADMIN_EMAIL
+if [ -n "$ADMIN_EMAIL" ]; then
+  psql "$DB_URL" -q -v ON_ERROR_STOP=1 -v email="$ADMIN_EMAIL" <<'SQL'
+UPDATE users SET role = 'admin' WHERE email = :'email';
 SQL
-echo "   пароли демо-сотрудников заменены на случайные"
+  echo "Готово, если такой email уже зарегистрирован (иначе запустите скрипт ещё раз после регистрации)."
+fi
 
-echo "→ Ваш аккаунт администратора"
-read -r -p "   Email: " ADMIN_EMAIL
-read -r -p "   Имя: " ADMIN_NAME
-read -r -s -p "   Пароль (мин. 6 символов, раскладка EN): " ADMIN_PW; echo
-read -r -s -p "   Повторите пароль: " ADMIN_PW2; echo
-[[ "$ADMIN_PW" == "$ADMIN_PW2" ]] || { echo "Пароли не совпали — запустите скрипт ещё раз"; exit 1; }
-[[ ${#ADMIN_PW} -ge 6 ]] || { echo "Пароль короче 6 символов"; exit 1; }
-psql "$DB_URL" -q -v ON_ERROR_STOP=1 -v email="$ADMIN_EMAIL" -v name="${ADMIN_NAME:-Admin}" -v pw="$ADMIN_PW" <<'SQL'
-INSERT INTO users (name, email, password_hash, role)
-VALUES (:'name', lower(:'email'), crypt(:'pw', gen_salt('bf', 10)), 'admin')
-ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, role = 'admin';
-SQL
-unset DB_URL ADMIN_PW ADMIN_PW2
-
-echo "✓ База готова. Войдите на сайте как $ADMIN_EMAIL"
+unset DB_URL
+echo "✓ База готова"
