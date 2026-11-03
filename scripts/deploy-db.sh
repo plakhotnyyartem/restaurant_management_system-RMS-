@@ -18,10 +18,22 @@ if [ "$DB_URL" = "$(grep '^DATABASE_URL=' backend/.env 2>/dev/null | cut -d= -f2
   echo "Это строка от локальной базы, а нужна облачная"; exit 1
 fi
 
+echo "→ Проверка подключения"
+if ! err=$(psql "$DB_URL" -qAtc "select 1" 2>&1 >/dev/null); then
+  echo "Не удалось подключиться: $err" | sed -E 's#postgres(ql)?://[^ ]*#<строка подключения>#g'
+  echo "Скопируйте строку заново (после сброса пароля старая не работает) и запустите скрипт ещё раз."
+  exit 1
+fi
+
 echo "→ Миграции"
 for f in backend/database/migrations/0*.sql; do
   echo "  ${f##*/}"
-  psql "$DB_URL" -q -v ON_ERROR_STOP=1 -f "$f" 2>&1 | grep -v "NOTICE\|already exists" || true
+  # Останавливаемся на первой ошибке: следующие миграции зависят от предыдущих.
+  if ! out=$(psql "$DB_URL" -q -v ON_ERROR_STOP=1 -f "$f" 2>&1); then
+    echo "$out" | grep -v "NOTICE"
+    echo "Миграция ${f##*/} не прошла, остальное не выполнялось."
+    exit 1
+  fi
 done
 
 echo "→ Часовой пояс базы: Asia/Almaty (как у сервера)"
