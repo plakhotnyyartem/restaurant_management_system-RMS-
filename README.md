@@ -22,6 +22,9 @@ cd ..
 Без `DATABASE_URL` или с `JWT_SECRET` короче 32 символов сервер не стартует и пишет, что исправить.
 
 ```bash
+# 0. Базовые таблицы (на пустой базе)
+psql "postgres://postgres:postgres@localhost:5432/restaurant_management" \
+     -f backend/database/migrations/000_schema.sql
 # 1. Миграция (себестоимость, проверки статусов и ролей, индексы)
 psql "postgres://postgres:postgres@localhost:5432/restaurant_management" \
      -f backend/database/migrations/001_analytics.sql
@@ -48,6 +51,24 @@ go run ./cmd/server
 ```
 
 Демо-сотрудники (пароль `password123`): `waiter@rms.kz`, `cook@rms.kz`, `owner@rms.kz`.
+
+## Деплой (бесплатно: Render + Neon)
+
+1. **База — [Neon](https://neon.tech):** создайте проект и скопируйте строку подключения.
+   Залейте схему, все миграции, демо-данные и свой аккаунт админа одной командой
+   (строка подключения и пароль вводятся скрыто):
+   ```bash
+   bash scripts/deploy-db.sh
+   ```
+   Пароли демо-сотрудников при этом заменяются на случайные.
+2. **Сервер — [Render](https://render.com):** New → Blueprint → этот репозиторий.
+   Render прочитает `render.yaml`, соберёт `Dockerfile` и спросит `DATABASE_URL`
+   (из Neon) и `TELEGRAM_BOT_TOKEN` (можно пусто). `JWT_SECRET` он сгенерирует сам.
+3. Бесплатный сервер засыпает через 15 минут без посетителей (первый заход ~1 мин,
+   бот спит вместе с ним). Чтобы не засыпал — бесплатный пинг `/api/health` раз в 10 минут
+   (например, UptimeRobot).
+4. Один токен бота нельзя запускать в двух местах: пока бот работает на Render,
+   уберите `TELEGRAM_BOT_TOKEN` из локального `backend/.env`.
 
 ## Роли
 
