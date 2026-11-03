@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -37,7 +38,9 @@ type Order struct {
 	UserID     int         `json:"user_id"`
 	UserName   string      `json:"user_name,omitempty"`
 	Status     string      `json:"status"`
-	TotalPrice float64     `json:"total_price"`
+	TotalPrice float64     `json:"total_price"` // already minus the discount
+	Discount   float64     `json:"discount"`
+	PromoCode  string      `json:"promo_code,omitempty"`
 	CreatedAt  time.Time   `json:"created_at"`
 	Items      []OrderItem `json:"items"`
 }
@@ -87,7 +90,8 @@ func (h *OrderHandler) loadOrders(ctx context.Context, query string, args ...any
 	var ids []int
 	for rows.Next() {
 		var o Order
-		if err := rows.Scan(&o.ID, &o.UserID, &o.UserName, &o.Status, &o.TotalPrice, &o.CreatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.UserID, &o.UserName, &o.Status, &o.TotalPrice,
+			&o.Discount, &o.PromoCode, &o.CreatedAt); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -132,20 +136,82 @@ func (h *OrderHandler) loadOrders(ctx context.Context, query string, args ...any
 // created_at is "timestamp without time zone" in the database's local time;
 // AT TIME ZONE turns it into a real moment, so JSON gets a correct offset.
 const orderSelect = `SELECT o.id, o.user_id, u.name, o.status, o.total_price,
+	o.discount, COALESCE(pc.code, ''),
 	o.created_at AT TIME ZONE current_setting('TimeZone')
-	FROM orders o JOIN users u ON u.id = o.user_id `
+	FROM orders o JOIN users u ON u.id = o.user_id
+	LEFT JOIN promo_codes pc ON pc.id = o.promo_code_id `
 
 // ---------- Customer endpoints ----------
 
+type OrderLine struct {
+	DishID   int `json:"dish_id" binding:"required"`
+	Quantity int `json:"quantity" binding:"required,min=1,max=50"`
+}
+
 type CreateOrderRequest struct {
-	Items []struct {
-		DishID   int `json:"dish_id" binding:"required"`
-		Quantity int `json:"quantity" binding:"required,min=1,max=50"`
-	} `json:"items" binding:"required,min=1,max=30,dive"`
+	Items     []OrderLine `json:"items" binding:"required,min=1,max=30,dive"`
+	PromoCode string      `json:"promo_code"` // optional
+}
+
+type dishPrice struct{ price, cost float64 }
+
+// pricedItems is a cart priced from the database.
+type pricedItems struct {
+	dishIDs    []int // in the order the guest added them
+	quantities map[int]int
+	prices     map[int]dishPrice
+	subtotal   float64
+}
+
+type dishUnavailableError struct{ DishID int }
+
+func (e *dishUnavailableError) Error() string { return "dish is not available" }
+
+// priceItems merges duplicate dishes ([{1,2},{1,1}] → {1: 3}) and prices them
+// from the database. Prices are never taken from the client.
+func priceItems(ctx context.Context, q dbtx, items []OrderLine) (*pricedItems, error) {
+	p := &pricedItems{quantities: map[int]int{}, prices: map[int]dishPrice{}}
+	for _, item := range items {
+		if _, seen := p.quantities[item.DishID]; !seen {
+			p.dishIDs = append(p.dishIDs, item.DishID)
+		}
+		p.quantities[item.DishID] += item.Quantity
+	}
+
+	rows, err := q.Query(ctx,
+		`SELECT id, price, cost_price FROM dishes
+		 WHERE id = ANY($1) AND COALESCE(is_available, true)`,
+		p.dishIDs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id int
+		var dp dishPrice
+		if err := rows.Scan(&id, &dp.price, &dp.cost); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		p.prices[id] = dp
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for _, id := range p.dishIDs {
+		dp, ok := p.prices[id]
+		if !ok {
+			return nil, &dishUnavailableError{DishID: id}
+		}
+		p.subtotal += dp.price * float64(p.quantities[id])
+	}
+	return p, nil
 }
 
 // CreateOrder — POST /api/orders
-// Prices are read from the database, never taken from the client.
+// Prices and the promo discount are computed here, never taken from the client.
 func (h *OrderHandler) CreateOrder(c *gin.Context) {
 	userID, _ := currentUser(c)
 
@@ -157,16 +223,6 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 		return
 	}
 
-	// Merge duplicate dishes: [{1,2},{1,1}] → {1: 3}
-	quantities := map[int]int{}
-	var dishIDs []int
-	for _, item := range req.Items {
-		if _, seen := quantities[item.DishID]; !seen {
-			dishIDs = append(dishIDs, item.DishID)
-		}
-		quantities[item.DishID] += item.Quantity
-	}
-
 	tx, err := h.DB.Begin(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create order"})
@@ -174,58 +230,55 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 	}
 	defer tx.Rollback(c) // no-op after Commit
 
-	type priced struct{ price, cost float64 }
-	prices := map[int]priced{}
-
-	rows, err := tx.Query(c,
-		`SELECT id, price, cost_price FROM dishes
-		 WHERE id = ANY($1) AND COALESCE(is_available, true)`,
-		dishIDs,
-	)
+	priced, err := priceItems(c, tx, req.Items)
+	var unavailable *dishUnavailableError
+	if errors.As(err, &unavailable) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "dish is not available",
+			"dish_id": unavailable.DishID,
+		})
+		return
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create order"})
 		return
 	}
-	for rows.Next() {
-		var id int
-		var p priced
-		if err := rows.Scan(&id, &p.price, &p.cost); err != nil {
-			rows.Close()
+
+	// The promo row stays locked until Commit, so its last use cannot be
+	// taken by two orders at once.
+	var promoID *int
+	var discount float64
+	if strings.TrimSpace(req.PromoCode) != "" {
+		promo, d, err := applyPromo(c, tx, userID, req.PromoCode, priced.subtotal, true)
+		var reason *promoError
+		if errors.As(err, &reason) {
+			reason.respond(c)
+			return
+		}
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create order"})
 			return
 		}
-		prices[id] = p
+		promoID, discount = &promo.ID, d
 	}
-	rows.Close()
-
-	var total float64
-	for _, id := range dishIDs {
-		p, ok := prices[id]
-		if !ok {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error":   "dish is not available",
-				"dish_id": id,
-			})
-			return
-		}
-		total += p.price * float64(quantities[id])
-	}
+	total := priced.subtotal - discount
 
 	var orderID int
 	err = tx.QueryRow(c,
-		`INSERT INTO orders (user_id, status, total_price) VALUES ($1, 'pending', $2) RETURNING id`,
-		userID, total,
+		`INSERT INTO orders (user_id, status, total_price, promo_code_id, discount)
+		 VALUES ($1, 'pending', $2, $3, $4) RETURNING id`,
+		userID, total, promoID, discount,
 	).Scan(&orderID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create order"})
 		return
 	}
 
-	for _, id := range dishIDs {
+	for _, id := range priced.dishIDs {
 		_, err = tx.Exec(c,
 			`INSERT INTO order_items (order_id, dish_id, quantity, price, cost_price)
 			 VALUES ($1, $2, $3, $4, $5)`,
-			orderID, id, quantities[id], prices[id].price, prices[id].cost,
+			orderID, id, priced.quantities[id], priced.prices[id].price, priced.prices[id].cost,
 		)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create order"})
@@ -244,7 +297,7 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 
 	orders, err := h.loadOrders(c, orderSelect+`WHERE o.id = $1`, orderID)
 	if err != nil || len(orders) == 0 {
-		c.JSON(http.StatusCreated, gin.H{"id": orderID, "total_price": total, "status": "pending"})
+		c.JSON(http.StatusCreated, gin.H{"id": orderID, "total_price": total, "discount": discount, "status": "pending"})
 		return
 	}
 	c.JSON(http.StatusCreated, orders[0])

@@ -125,6 +125,7 @@ const API = {
     if (!response.ok) {
       const error = new Error(data?.error || "HTTP " + response.status);
       error.status = response.status;
+      error.data = data; // дополнительные поля ответа, например min_total у промокода
       throw error;
     }
     return data;
@@ -362,7 +363,7 @@ const UI = {
         <div>
           <h4>Контакты</h4>
           <p>Алматы, пр. Абая, 10</p>
-          <p>+7 (700) 000-00-00</p>
+          <p><a href="tel:+77783870867">+7 (778) 387-08-67</a></p>
           <p>hello@rms.kz</p>
           <p id="footer-telegram" hidden></p>
         </div>

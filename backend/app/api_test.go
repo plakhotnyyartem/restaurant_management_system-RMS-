@@ -800,3 +800,169 @@ func TestFrontendIsNotCachedBlindly(t *testing.T) {
 		}
 	}
 }
+
+// ---------- Promo codes ----------
+
+// newPromo creates a promo code through the admin API; it and the orders that
+// used it are removed after the test. Call it before creating the customers:
+// cleanups run in reverse, so the customers' orders are gone by then.
+func newPromo(t *testing.T, admin string, body map[string]any) (int, string) {
+	t.Helper()
+	code := fmt.Sprintf("T%d-%d", time.Now().UnixNano()%1_000_000_000, counter.Add(1))
+	body["code"] = strings.ToLower(code) // stored upper-case whatever the admin types
+	res := request(t, "POST", "/api/admin/promo", admin, body)
+	expect(t, res, http.StatusCreated, "create promo")
+	if res.Body["code"] != code {
+		t.Fatalf("code = %v, want %s", res.Body["code"], code)
+	}
+	id := int(res.Body["id"].(float64))
+	t.Cleanup(func() {
+		ctx := context.Background()
+		testDB.Exec(ctx, `DELETE FROM orders WHERE promo_code_id = $1`, id)
+		testDB.Exec(ctx, `DELETE FROM promo_codes WHERE id = $1`, id)
+	})
+	return id, code
+}
+
+func promoReason(t *testing.T, res response, want string) {
+	t.Helper()
+	if res.Code != http.StatusBadRequest || res.Body["error"] != want {
+		t.Fatalf("want 400 %s, got %d %s", want, res.Code, res.Raw)
+	}
+}
+
+func TestPromoCodes(t *testing.T) {
+	needDB(t)
+	dishID, price, _ := dishByName(t, "Пепперони")
+	_, admin := createUser(t, "admin")
+	promoID, code := newPromo(t, admin, map[string]any{
+		"kind": "percent", "value": 10, "max_uses": 2, "description": "test",
+	})
+	_, alice := createUser(t, "customer")
+	_, bob := createUser(t, "customer")
+	_, carol := createUser(t, "customer")
+	line := map[string]any{"dish_id": dishID, "quantity": 1}
+	discount := math.Floor(price * 0.10)
+
+	// Preview in the cart: case and spaces do not matter.
+	check := request(t, "POST", "/api/promo/check", alice, map[string]any{
+		"code": "  " + strings.ToLower(code) + " ", "items": []any{line},
+	})
+	expect(t, check, http.StatusOK, "check promo")
+	if check.Body["discount"].(float64) != discount || check.Body["total"].(float64) != price-discount {
+		t.Fatalf("check = %v, want discount %v of %v", check.Body, discount, price)
+	}
+
+	order := request(t, "POST", "/api/orders", alice, map[string]any{"items": []any{line}, "promo_code": code})
+	expect(t, order, http.StatusCreated, "order with promo")
+	if order.Body["total_price"].(float64) != price-discount || order.Body["discount"].(float64) != discount ||
+		order.Body["promo_code"] != code {
+		t.Fatalf("order = %v, want total %v, discount %v, code %s", order.Body, price-discount, discount, code)
+	}
+
+	// Once per guest, and at most max_uses orders in total.
+	promoReason(t, request(t, "POST", "/api/orders", alice, map[string]any{"items": []any{line}, "promo_code": code}), "promo_used")
+	expect(t, request(t, "POST", "/api/orders", bob, map[string]any{"items": []any{line}, "promo_code": code}),
+		http.StatusCreated, "second use")
+	promoReason(t, request(t, "POST", "/api/orders", carol, map[string]any{"items": []any{line}, "promo_code": code}), "promo_exhausted")
+
+	// A cancelled order gives its use back.
+	cancel := fmt.Sprintf("/api/orders/%d/cancel", int(order.Body["id"].(float64)))
+	expect(t, request(t, "POST", cancel, alice, nil), http.StatusOK, "cancel")
+	expect(t, request(t, "POST", "/api/orders", carol, map[string]any{"items": []any{line}, "promo_code": code}),
+		http.StatusCreated, "use freed by the cancellation")
+
+	// Admin list counts only live orders.
+	list := request(t, "GET", "/api/admin/promo", admin, nil)
+	expect(t, list, http.StatusOK, "list promos")
+	for _, item := range list.List {
+		p := item.(map[string]any)
+		if int(p["id"].(float64)) == promoID && p["uses"].(float64) != 2 {
+			t.Fatalf("uses = %v, want 2 (the cancelled order does not count)", p["uses"])
+		}
+	}
+
+	// A turned-off code stops working; a used code cannot be deleted.
+	expect(t, request(t, "PUT", fmt.Sprintf("/api/admin/promo/%d", promoID), admin, map[string]any{
+		"code": code, "kind": "percent", "value": 10, "max_uses": 5, "is_active": false,
+	}), http.StatusOK, "turn off")
+	promoReason(t, request(t, "POST", "/api/promo/check", alice, map[string]any{"code": code, "items": []any{line}}), "promo_inactive")
+	expect(t, request(t, "DELETE", fmt.Sprintf("/api/admin/promo/%d", promoID), admin, nil),
+		http.StatusConflict, "delete a used promo")
+
+	promoReason(t, request(t, "POST", "/api/promo/check", alice, map[string]any{"code": "NO-SUCH-CODE", "items": []any{line}}), "promo_not_found")
+	expect(t, request(t, "GET", "/api/admin/promo", alice, nil), http.StatusForbidden, "customer lists promos")
+}
+
+func TestPromoLimits(t *testing.T) {
+	needDB(t)
+	dishID, price, _ := dishByName(t, "Пепперони")
+	_, admin := createUser(t, "admin")
+	_, minCode := newPromo(t, admin, map[string]any{"kind": "fixed", "value": 500, "min_total": price + 1})
+	_, bigCode := newPromo(t, admin, map[string]any{"kind": "fixed", "value": price * 10})
+	_, oldCode := newPromo(t, admin, map[string]any{"kind": "percent", "value": 5, "valid_until": "2020-01-01"})
+	_, customer := createUser(t, "customer")
+	line := map[string]any{"dish_id": dishID, "quantity": 1}
+
+	res := request(t, "POST", "/api/promo/check", customer, map[string]any{"code": minCode, "items": []any{line}})
+	promoReason(t, res, "promo_min_total")
+	if res.Body["min_total"].(float64) != price+1 {
+		t.Fatalf("min_total = %v, want %v", res.Body["min_total"], price+1)
+	}
+	promoReason(t, request(t, "POST", "/api/promo/check", customer, map[string]any{"code": oldCode, "items": []any{line}}), "promo_expired")
+
+	// A discount bigger than the order makes it free, never negative.
+	order := request(t, "POST", "/api/orders", customer, map[string]any{"items": []any{line}, "promo_code": bigCode})
+	expect(t, order, http.StatusCreated, "order with a huge discount")
+	if order.Body["total_price"].(float64) != 0 || order.Body["discount"].(float64) != price {
+		t.Fatalf("order = %v, want total 0 and discount %v", order.Body, price)
+	}
+
+	// Bad promo data is rejected.
+	for name, body := range map[string]map[string]any{
+		"percent over 90": {"code": "BAD-PCT", "kind": "percent", "value": 95},
+		"unknown kind":    {"code": "BAD-KIND", "kind": "gift", "value": 5},
+		"short code":      {"code": "AB", "kind": "fixed", "value": 5},
+		"bad date":        {"code": "BAD-DATE", "kind": "fixed", "value": 5, "valid_until": "31.12.2026"},
+	} {
+		expect(t, request(t, "POST", "/api/admin/promo", admin, body), http.StatusBadRequest, name)
+	}
+}
+
+// Two guests take the last use at the same moment: the promo row is locked
+// inside the order transaction, so exactly one of them gets the discount.
+func TestPromoLastUseRace(t *testing.T) {
+	needDB(t)
+	dishID, _, _ := dishByName(t, "Пепперони")
+	_, admin := createUser(t, "admin")
+	_, code := newPromo(t, admin, map[string]any{"kind": "fixed", "value": 100, "max_uses": 1})
+
+	const guests = 6
+	tokens := make([]string, guests)
+	for i := range tokens {
+		_, tokens[i] = createUser(t, "customer")
+	}
+
+	var wg sync.WaitGroup
+	codes := make([]int, guests)
+	for i := range tokens {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			codes[i] = request(t, "POST", "/api/orders", tokens[i], map[string]any{
+				"items": []any{map[string]any{"dish_id": dishID, "quantity": 1}}, "promo_code": code,
+			}).Code
+		}(i)
+	}
+	wg.Wait()
+
+	created := 0
+	for _, code := range codes {
+		if code == http.StatusCreated {
+			created++
+		}
+	}
+	if created != 1 {
+		t.Fatalf("%d orders got the single-use promo (codes %v), want exactly 1", created, codes)
+	}
+}
