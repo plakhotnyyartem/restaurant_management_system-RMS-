@@ -1,19 +1,22 @@
 # Render Blueprint: Render → New → Blueprint → этот репозиторий.
-# Секреты с sync: false Render спросит при создании — в git их нет.
+# Секреты (sync: false) Render спросит при создании; в git их нет.
 services:
   - type: web
     name: rms
     runtime: docker
     plan: free
     region: frankfurt
+    branch: main
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
-      - key: DATABASE_URL        # строка подключения из Neon
+      - key: DATABASE_URL          # строка подключения Neon (postgresql://…?sslmode=require)
         sync: false
-      - key: JWT_SECRET          # Render сам сгенерирует длинный случайный секрет
+      - key: JWT_SECRET            # Render сам придумает длинный случайный секрет
         generateValue: true
-      - key: TELEGRAM_BOT_TOKEN  # можно оставить пустым — бот просто выключится
+      - key: TELEGRAM_BOT_TOKEN    # можно оставить пустым — бот просто выключится
+        sync: false
+      - key: ANTHROPIC_API_KEY     # можно оставить пустым — ИИ-ассистент ответит 503
         sync: false
       - key: DIGEST_HOUR
         value: "9"

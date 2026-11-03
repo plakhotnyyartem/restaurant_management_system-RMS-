@@ -1,7 +1,9 @@
-.git
+# Секреты никогда не попадают в образ: на сервере они приходят из переменных окружения
+.env
+*.env
 **/.env
-**/.env.*
-!**/.env.example
-**/*_test.go
-**/node_modules
+
+.git
 .DS_Store
+.idea
+backend/server
