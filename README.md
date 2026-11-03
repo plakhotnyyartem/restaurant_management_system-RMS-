@@ -87,6 +87,8 @@ pending → confirmed → preparing → ready → completed
    └────→ cancelled
 ```
 
+Сделать пользователя админом в любой базе: `bash scripts/make-admin.sh you@example.com`.
+
 ## API
 
 | Метод | Путь | Доступ |
