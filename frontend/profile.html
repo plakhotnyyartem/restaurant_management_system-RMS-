@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script>try{var t=localStorage.getItem("rm_theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
-  <link rel="stylesheet" href="css/style.css?v=20261006-67">
+  <link rel="stylesheet" href="css/style.css?v=20261103-promo">
 </head>
 <body>
   <header id="site-header"></header>
@@ -26,7 +26,7 @@
 
   <footer id="site-footer"></footer>
 
-  <script src="js/app.js?v=20261006-67"></script>
+  <script src="js/app.js?v=20261103-promo"></script>
   <script>
     const STATUS_FLOW = ["pending", "confirmed", "preparing", "ready", "completed"];
     const STATUS_LABEL = {
@@ -97,7 +97,10 @@
             ${status === "pending" && order.id !== 1024
               ? `<button class="btn btn-danger btn-sm" data-cancel="${order.id}">Отменить заказ</button>`
               : "<span></span>"}
-            <strong style="font-size:18px">${money(order.total_price ?? order.total ?? 0)}</strong>
+            <div style="text-align:right">
+              ${order.discount > 0 ? `<div class="muted" style="font-size:13px">Промокод ${esc(order.promo_code || "")}: −${money(order.discount)}</div>` : ""}
+              <strong style="font-size:18px">${money(order.total_price ?? order.total ?? 0)}</strong>
+            </div>
           </div>
         </div>`;
     }

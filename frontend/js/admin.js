@@ -12,6 +12,7 @@ const SECTIONS = {
   analytics: { title: "Аналитика", roles: ["admin", "owner"] },
   forecast: { title: "Прогноз", roles: ["admin", "owner"] },
   purchasing: { title: "Закупки", roles: ["admin", "owner"] },
+  promo: { title: "Промокоды", roles: ["admin", "owner"] },
   inventory: { title: "Склад", roles: ["admin", "owner", "cook"] },
   orders: { title: "Заказы", roles: ["admin", "waiter", "cook"] },
   dishes: { title: "Блюда", roles: ["admin"] },
@@ -74,6 +75,13 @@ function adminError(error) {
     "an ingredient is listed twice": "Один продукт указан дважды",
     "ingredient not found": "Продукт не найден",
     "ingredient is used in recipes, remove it from them first": "Продукт используется в техкартах — сначала уберите его оттуда",
+    "promo code already exists": "Такой промокод уже есть",
+    "promo code was used, turn it off instead": "Промокод уже использовали — его можно только выключить",
+    "code must be 3-32 latin letters, digits, - or _": "Код: 3–32 символа, латиница, цифры, - или _",
+    "percent discount must be 1-90": "Скидка в процентах — от 1 до 90",
+    "fixed discount must be 1-1000000": "Скидка в тенге — от 1 до 1 000 000",
+    "max_uses must be 1-1000000 or empty": "Лимит использований — от 1 или пусто",
+    "valid_until must be YYYY-MM-DD": "Неверная дата окончания",
   };
   if (error.status === 403 && !messages[error.message]) return "Недостаточно прав";
   return messages[error.message] || error.message;
@@ -1272,6 +1280,164 @@ async function renderCategories() {
   });
 }
 
+// ---------- Промокоды ----------
+
+let editingPromo = null; // промокод, открытый в форме на редактирование
+
+function promoValue(p) {
+  return p.kind === "percent" ? `${p.value}%` : money(p.value);
+}
+
+function promoConditions(p, today) {
+  const parts = [];
+  if (p.min_total > 0) parts.push(`от ${money(p.min_total)}`);
+  parts.push(p.once_per_user ? "1 раз на гостя" : "многоразовый");
+  if (p.valid_until) {
+    const date = new Date(p.valid_until + "T00:00").toLocaleDateString("ru-RU");
+    parts.push(p.valid_until < today ? `<span class="warn">истёк ${date}</span>` : `до ${date}`);
+  }
+  return parts.join(" · ");
+}
+
+function promoForm(p) {
+  const v = p || { code: "", kind: "percent", value: "", min_total: 0, max_uses: null, once_per_user: true, valid_until: null, description: "" };
+  return `
+    <div class="panel">
+      <h3>${p ? "Промокод " + esc(p.code) : "Новый промокод"}</h3>
+      <form id="promo-form" class="form-grid">
+        <div class="field"><label for="p-code">Код</label>
+          <input class="input" id="p-code" value="${esc(v.code)}" maxlength="32" required placeholder="WELCOME10" style="text-transform:uppercase"></div>
+        <div class="field"><label for="p-kind">Тип скидки</label>
+          <select class="input" id="p-kind">
+            <option value="percent" ${v.kind === "percent" ? "selected" : ""}>Процент от заказа</option>
+            <option value="fixed" ${v.kind === "fixed" ? "selected" : ""}>Фиксированная сумма, ₸</option>
+          </select></div>
+        <div class="field"><label for="p-value">Размер скидки</label>
+          <input class="input" id="p-value" type="number" min="1" step="1" value="${v.value}" required></div>
+        <div class="field"><label for="p-min">Минимальная сумма заказа, ₸</label>
+          <input class="input" id="p-min" type="number" min="0" step="1" value="${v.min_total}"></div>
+        <div class="field"><label for="p-max">Лимит использований <span class="muted">(пусто — без лимита)</span></label>
+          <input class="input" id="p-max" type="number" min="1" step="1" value="${v.max_uses ?? ""}"></div>
+        <div class="field"><label for="p-until">Действует до <span class="muted">(включительно)</span></label>
+          <input class="input" id="p-until" type="date" value="${v.valid_until ?? ""}"></div>
+        <div class="field full"><label for="p-desc">Описание для гостя</label>
+          <input class="input" id="p-desc" maxlength="200" value="${esc(v.description)}" placeholder="Скидка 10% для новых гостей"></div>
+        <label class="checkbox full" style="margin-bottom:16px"><input type="checkbox" id="p-once" ${v.once_per_user ? "checked" : ""}> Один раз на гостя</label>
+        <div class="full" style="display:flex;gap:10px">
+          <button class="btn" type="submit">${p ? "Сохранить" : "Создать промокод"}</button>
+          ${p ? '<button class="btn btn-ghost" type="button" id="promo-cancel">Отмена</button>' : ""}
+        </div>
+      </form>
+    </div>`;
+}
+
+function promoBody(p, overrides = {}) {
+  return {
+    code: p.code, kind: p.kind, value: p.value, min_total: p.min_total, max_uses: p.max_uses,
+    once_per_user: p.once_per_user, valid_until: p.valid_until || "", is_active: p.is_active,
+    description: p.description, ...overrides,
+  };
+}
+
+async function renderPromos() {
+  let list;
+  try {
+    list = await API.get("/admin/promo");
+  } catch (error) {
+    main.innerHTML = "<h2>Промокоды</h2>" + errorBlock("Ошибка загрузки", error);
+    return;
+  }
+  if (editingPromo) editingPromo = list.find((p) => p.id === editingPromo.id) || null;
+  const today = new Date().toISOString().slice(0, 10);
+
+  main.innerHTML = `
+    <h2>Промокоды</h2>
+    ${promoForm(editingPromo)}
+    <div class="panel table-wrap">
+      <table>
+        <thead><tr>
+          <th>Код</th><th>Скидка</th><th>Условия</th><th class="num">Использован</th><th>Вкл.</th><th></th>
+        </tr></thead>
+        <tbody>
+          ${list.map((p) => {
+            const exhausted = p.max_uses && p.uses >= p.max_uses;
+            return `
+            <tr>
+              <td><strong>${esc(p.code)}</strong>${p.description ? `<div class="muted" style="font-size:13px">${esc(p.description)}</div>` : ""}</td>
+              <td style="white-space:nowrap">${promoValue(p)}</td>
+              <td class="muted" style="font-size:14px">${promoConditions(p, today)}</td>
+              <td class="num">${p.uses}${p.max_uses ? " / " + p.max_uses : ""}${exhausted ? ' <span class="warn">исчерпан</span>' : ""}
+                ${p.discounted > 0 ? `<div class="muted" style="font-size:13px">−${money(p.discounted)}</div>` : ""}</td>
+              <td><button class="switch ${p.is_active ? "on" : ""}" data-toggle="${p.id}" aria-label="Включить или выключить ${esc(p.code)}"></button></td>
+              <td class="actions">
+                <button class="btn btn-ghost btn-sm" data-edit="${p.id}">Изменить</button>
+                <button class="icon-btn" data-delete="${p.id}" aria-label="Удалить ${esc(p.code)}" title="Удалить">✕</button>
+              </td>
+            </tr>`;
+          }).join("") || '<tr><td colspan="6" class="muted">Промокодов пока нет</td></tr>'}
+        </tbody>
+      </table>
+    </div>`;
+
+  document.getElementById("promo-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const maxUses = document.getElementById("p-max").value;
+    const body = {
+      code: document.getElementById("p-code").value,
+      kind: document.getElementById("p-kind").value,
+      value: Number(document.getElementById("p-value").value),
+      min_total: Number(document.getElementById("p-min").value) || 0,
+      max_uses: maxUses ? Number(maxUses) : null,
+      valid_until: document.getElementById("p-until").value,
+      once_per_user: document.getElementById("p-once").checked,
+      description: document.getElementById("p-desc").value,
+      is_active: editingPromo ? editingPromo.is_active : true,
+    };
+    try {
+      const saved = editingPromo
+        ? await API.put("/admin/promo/" + editingPromo.id, body)
+        : await API.post("/admin/promo", body);
+      UI.toast(`Промокод ${saved.code} ${editingPromo ? "сохранён" : "создан"}`, "success");
+      editingPromo = null;
+      renderPromos();
+    } catch (error) {
+      UI.toast(adminError(error), "error");
+    }
+  });
+
+  document.getElementById("promo-cancel")?.addEventListener("click", () => {
+    editingPromo = null;
+    renderPromos();
+  });
+
+  main.querySelector("tbody").addEventListener("click", async (e) => {
+    const button = e.target.closest("[data-toggle], [data-edit], [data-delete]");
+    if (!button) return;
+    const p = list.find((x) => x.id === Number(button.dataset.toggle || button.dataset.edit || button.dataset.delete));
+    if (!p) return;
+
+    if (button.dataset.edit) {
+      editingPromo = p;
+      renderPromos();
+      main.scrollIntoView({ behavior: "smooth" });
+      return;
+    }
+    try {
+      if (button.dataset.toggle) {
+        await API.put("/admin/promo/" + p.id, promoBody(p, { is_active: !p.is_active }));
+        UI.toast(`${p.code}: ${p.is_active ? "выключен" : "включён"}`, "success");
+      } else {
+        if (!confirm(`Удалить промокод ${p.code}?`)) return;
+        await API.delete("/admin/promo/" + p.id);
+        UI.toast(`Промокод ${p.code} удалён`, "success");
+      }
+      renderPromos();
+    } catch (error) {
+      UI.toast(adminError(error), "error");
+    }
+  });
+}
+
 // ---------- Пользователи ----------
 
 async function renderUsers() {
@@ -1302,6 +1468,7 @@ const renderers = {
   assistant: renderAssistant,
   forecast: renderForecast,
   purchasing: renderPurchasing,
+  promo: renderPromos,
   inventory: renderInventory,
   orders: renderOrders,
   dishes: renderDishes,

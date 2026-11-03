@@ -41,6 +41,10 @@ func NewRouter(db *pgxpool.Pool, bot *handlers.TelegramBot) *gin.Engine {
 		orderHandler.Notify = bot
 	}
 
+	promoHandler := &handlers.PromoHandler{
+		DB: db,
+	}
+
 	recipeHandler := &handlers.RecipeHandler{
 		DB: db,
 	}
@@ -100,6 +104,7 @@ func NewRouter(db *pgxpool.Pool, bot *handlers.TelegramBot) *gin.Engine {
 	protected.GET("/orders", orderHandler.GetMyOrders)
 	protected.GET("/orders/:id", orderHandler.GetOrder)
 	protected.POST("/orders/:id/cancel", orderHandler.CancelMyOrder)
+	protected.POST("/promo/check", promoHandler.CheckPromo)
 
 	// Staff: order queue for waiters and cooks
 	// (which status each role may set is checked inside UpdateStatus)
@@ -124,6 +129,14 @@ func NewRouter(db *pgxpool.Pool, bot *handlers.TelegramBot) *gin.Engine {
 	assistant := protected.Group("/admin/assistant")
 	assistant.Use(handlers.RequireRole("admin", "owner"))
 	assistant.POST("", assistantHandler.Ask)
+
+	// Promo codes: marketing belongs to the owner, the admin runs the site
+	promo := protected.Group("/admin/promo")
+	promo.Use(handlers.RequireRole("admin", "owner"))
+	promo.GET("", promoHandler.ListPromos)
+	promo.POST("", promoHandler.CreatePromo)
+	promo.PUT("/:id", promoHandler.UpdatePromo)
+	promo.DELETE("/:id", promoHandler.DeletePromo)
 
 	// Warehouse: the cook sees stock and receives deliveries, the owner watches it
 	inventory := protected.Group("/admin/inventory")

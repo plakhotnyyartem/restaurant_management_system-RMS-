@@ -34,6 +34,9 @@ psql "postgres://postgres:postgres@localhost:5432/restaurant_management" \
 # «Соус 67» (пасхалка: заказ ровно на 67 ₸ показывает анимацию «six seven»)
 psql "postgres://postgres:postgres@localhost:5432/restaurant_management" \
      -f backend/database/migrations/004_sauce.sql
+# промокоды (+ демо-коды WELCOME10 и RMS500)
+psql "postgres://postgres:postgres@localhost:5432/restaurant_management" \
+     -f backend/database/migrations/005_promo.sql
 
 # 2. Демо-данные: меню, сотрудники, 250 клиентов, ~15 000 заказов за 180 дней,
 #    37 продуктов, техкарты всех блюд и начальные остатки склада.
@@ -72,6 +75,7 @@ pending → confirmed → preparing → ready → completed
 | GET | `/api/dishes/:id/pairs` — «с этим берут» | все |
 | POST / GET | `/api/orders`, `/api/orders/:id` | авторизованные |
 | POST | `/api/orders/:id/cancel` | владелец заказа |
+| POST | `/api/promo/check` — скидка по промокоду для корзины | авторизованные |
 | GET / PUT | `/api/admin/orders`, `/api/admin/orders/:id/status` | admin, waiter, cook |
 | CRUD | `/api/admin/categories`, `/api/admin/dishes` | admin |
 | GET | `/api/admin/analytics/{summary,sales,heatmap,menu,pairs,recommendations}?days=N` | admin, owner |
@@ -83,6 +87,7 @@ pending → confirmed → preparing → ready → completed
 | GET | `/api/admin/ingredients` — справочник продуктов | admin, cook |
 | POST / PUT / DELETE | `/api/admin/ingredients`, `/api/admin/ingredients/:id` | admin |
 | POST | `/api/admin/assistant` — вопрос ИИ-ассистенту | admin, owner |
+| GET / POST / PUT / DELETE | `/api/admin/promo`, `/api/admin/promo/:id` — промокоды | admin, owner |
 | GET / POST / DELETE | `/api/telegram`, `/api/telegram/link` — привязка Telegram | авторизованные |
 
 ## Модуль аналитики и поддержки решений

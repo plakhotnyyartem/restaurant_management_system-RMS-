@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script>try{var t=localStorage.getItem("rm_theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
-  <link rel="stylesheet" href="css/style.css?v=20261006-67">
+  <link rel="stylesheet" href="css/style.css?v=20261103-promo">
 </head>
 <body>
   <header id="site-header"></header>
@@ -22,13 +22,82 @@
 
   <footer id="site-footer"></footer>
 
-  <script src="js/app.js?v=20261006-67"></script>
+  <script src="js/app.js?v=20261103-promo"></script>
   <script>
     initPage("cart");
 
     const root = document.getElementById("cart");
     // Фото берём из меню: в корзинах, собранных до появления фото, их нет.
     let photos = new Map();
+
+    // ---------- Промокод ----------
+    // Код запоминается, скидку же всегда считает сервер: и в предпросмотре
+    // (POST /promo/check), и ещё раз при оформлении заказа.
+    let promoCode = store.get("rm_promo", "");
+    let promo = null;        // ответ /promo/check: { code, discount, total, description }
+    let promoMessage = "";   // почему код не применился
+
+    const PROMO_ERRORS = {
+      promo_not_found: () => "Такого промокода нет",
+      promo_inactive: () => "Этот промокод больше не действует",
+      promo_expired: () => "Срок действия промокода истёк",
+      promo_exhausted: () => "Промокод уже использовали максимальное число раз",
+      promo_used: () => "Вы уже использовали этот промокод",
+      promo_min_total: (data) => `Промокод действует для заказа от ${money(data?.min_total ?? 0)}`,
+    };
+
+    function promoErrorText(error) {
+      const text = PROMO_ERRORS[error.message];
+      return text ? text(error.data) : "Не удалось проверить промокод: " + error.message;
+    }
+
+    function setPromoCode(code) {
+      promoCode = code;
+      if (code) store.set("rm_promo", code); else store.remove("rm_promo");
+    }
+
+    // Пересчитать скидку для текущей корзины (после ввода кода и любых изменений корзины).
+    async function refreshPromo() {
+      const items = Cart.items();
+      if (!promoCode || !items.length || !Auth.isLoggedIn()) {
+        promo = null;
+        render();
+        return;
+      }
+      try {
+        promo = await API.post("/promo/check", {
+          code: promoCode,
+          items: items.map((i) => ({ dish_id: i.id, quantity: i.quantity })),
+        });
+        promoMessage = "";
+      } catch (error) {
+        promo = null;
+        promoMessage = promoErrorText(error);
+        // Кода нет совсем — забываем его; остальные причины могут пройти (например, мин. сумма).
+        if (error.message === "promo_not_found") setPromoCode("");
+      }
+      render();
+    }
+
+    function promoBlock() {
+      if (!Auth.isLoggedIn()) {
+        return `<p class="promo-msg"><a class="tg-link" href="login.html?next=cart.html">Войдите</a>, чтобы применить промокод</p>`;
+      }
+      if (promo) {
+        return `
+          <div class="promo-applied">
+            <span><b>${esc(promo.code)}</b>${promo.description ? " · " + esc(promo.description) : ""}</span>
+            <button class="icon-btn" id="promo-remove" aria-label="Убрать промокод">✕</button>
+          </div>`;
+      }
+      return `
+        <form class="promo-form" id="promo-form">
+          <input class="input" id="promo-input" placeholder="Промокод" maxlength="32"
+                 autocomplete="off" autocapitalize="characters" value="${esc(promoCode)}">
+          <button class="btn btn-ghost" type="submit">Применить</button>
+        </form>
+        ${promoMessage ? `<p class="promo-msg error">${esc(promoMessage)}</p>` : ""}`;
+    }
 
     function render() {
       const items = Cart.items();
@@ -68,8 +137,12 @@
           <aside class="summary">
             <h3>Ваш заказ</h3>
             <div class="summary-line"><span>Позиций</span><span>${Cart.count()}</span></div>
+            ${promo ? `
+              <div class="summary-line"><span>Сумма</span><span>${money(promo.subtotal)}</span></div>
+              <div class="summary-line discount"><span>Скидка по промокоду</span><span>−${money(promo.discount)}</span></div>` : ""}
             <div class="summary-line"><span>Доставка</span><span>Бесплатно</span></div>
-            <div class="summary-total"><span>Итого</span><span>${money(Cart.total())}</span></div>
+            <div class="summary-total"><span>Итого</span><span>${money(promo ? promo.total : Cart.total())}</span></div>
+            <div class="promo">${promoBlock()}</div>
             <button class="btn btn-block" id="checkout">Оформить заказ</button>
             ${Auth.isLoggedIn() ? "" : '<p class="muted" style="font-size:13px;margin-top:10px;text-align:center">Для оформления нужно войти</p>'}
           </aside>
@@ -83,6 +156,7 @@
         const item = Cart.items().find((i) => i.id === id);
         if (item) Cart.setQuantity(id, item.quantity + Number(step.dataset.step));
         render();
+        refreshPromo(); // скидка зависит от суммы
         return;
       }
 
@@ -90,12 +164,31 @@
       if (remove) {
         Cart.remove(Number(remove.dataset.remove));
         render();
+        refreshPromo();
+        return;
+      }
+
+      if (e.target.closest("#promo-remove")) {
+        setPromoCode("");
+        promo = null;
+        promoMessage = "";
+        render();
         return;
       }
 
       if (e.target.id === "checkout") {
         await checkout(e.target);
       }
+    });
+
+    root.addEventListener("submit", async (e) => {
+      if (e.target.id !== "promo-form") return;
+      e.preventDefault();
+      const code = document.getElementById("promo-input").value.trim().toUpperCase();
+      if (!code) return;
+      setPromoCode(code);
+      await refreshPromo();
+      if (promo) UI.toast(`Промокод ${promo.code} применён: −${money(promo.discount)}`, "success");
     });
 
     async function checkout(button) {
@@ -109,10 +202,14 @@
       const body = {
         items: Cart.items().map((i) => ({ dish_id: i.id, quantity: i.quantity })),
       };
+      // Код уходит только если сервер его уже принял в предпросмотре;
+      // скидку сервер всё равно посчитает заново.
+      if (promo) body.promo_code = promo.code;
 
       try {
         const order = await API.post("/orders", body);
         Cart.clear();
+        setPromoCode("");
         UI.toast(`Заказ #${order?.id ?? ""} оформлен!`, "success");
         // Пасхалка: сумму берём из ответа сервера, а не из корзины.
         if (Number(order?.total_price) === 67) await playSixSeven();
@@ -120,6 +217,14 @@
       } catch (error) {
         if (API.isMissing(error)) {
           UI.toast("Orders API ещё в разработке (RM-7) — корзина сохранена", "error");
+        } else if (error.message.startsWith("promo_")) {
+          // Пока гость думал, код могли выключить или исчерпать: заказ не создан,
+          // показываем причину, и можно оформить без скидки.
+          promo = null;
+          promoMessage = promoErrorText(error);
+          render();
+          UI.toast("Заказ не оформлен: " + promoMessage, "error");
+          return;
         } else {
           UI.toast("Не удалось оформить заказ: " + error.message, "error");
         }
@@ -162,6 +267,7 @@
     }
 
     render();
+    refreshPromo(); // код, введённый раньше, проверяем заново для текущей корзины
     Data.dishes().then((dishes) => {
       photos = new Map(dishes.filter((d) => d.image_url).map((d) => [d.id, d.image_url]));
       render();
