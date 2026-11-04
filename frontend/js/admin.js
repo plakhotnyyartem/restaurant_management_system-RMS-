@@ -82,6 +82,9 @@ function adminError(error) {
     "fixed discount must be 1-1000000": "Скидка в тенге — от 1 до 1 000 000",
     "max_uses must be 1-1000000 or empty": "Лимит использований — от 1 или пусто",
     "valid_until must be YYYY-MM-DD": "Неверная дата окончания",
+    "you cannot change your own role": "Свою роль менять нельзя",
+    "cannot remove the last admin": "Нельзя снять последнего администратора",
+    "user not found": "Пользователь не найден",
   };
   if (error.status === 403 && !messages[error.message]) return "Недостаточно прав";
   return messages[error.message] || error.message;
@@ -1440,10 +1443,116 @@ async function renderPromos() {
 
 // ---------- Пользователи ----------
 
+const ROLE_LABEL = {
+  customer: "Клиент",
+  waiter: "Официант",
+  cook: "Повар",
+  owner: "Владелец",
+  admin: "Администратор",
+};
+const usersView = { q: "", role: "", offset: 0 };
+const USERS_PAGE = 50;
+
 async function renderUsers() {
+  const params = new URLSearchParams({ limit: USERS_PAGE, offset: usersView.offset });
+  if (usersView.q) params.set("q", usersView.q);
+  if (usersView.role) params.set("role", usersView.role);
+  let data;
+  try {
+    data = await API.get("/admin/users?" + params);
+  } catch (error) {
+    main.innerHTML = "<h2>Пользователи</h2>" + errorBlock("Ошибка загрузки", error);
+    return;
+  }
+  const me = Auth.user()?.id;
+  const all = Object.values(data.roles).reduce((a, b) => a + b, 0);
+  const from = data.total ? usersView.offset + 1 : 0;
+  const to = usersView.offset + data.users.length;
+  const date = (d) => new Date(d).toLocaleDateString("ru-RU");
+
   main.innerHTML = `
     <h2>Пользователи</h2>
-    <div class="note"><span>🚧</span><span>Раздел ждёт бэкенд (RM-10): <code>GET /api/admin/users</code>, смена роли сотрудника.</span></div>`;
+    <div class="filters">
+      <label class="search"><input class="input" id="users-q" type="search" placeholder="Имя или email" value="${esc(usersView.q)}"></label>
+      <button class="chip ${usersView.role ? "" : "active"}" data-role="">Все ${all}</button>
+      ${Object.keys(ROLE_LABEL).map((r) => `
+        <button class="chip ${usersView.role === r ? "active" : ""}" data-role="${r}">${ROLE_LABEL[r]} ${data.roles[r] || 0}</button>`).join("")}
+    </div>
+    <div class="panel table-wrap">
+      <table>
+        <thead><tr>
+          <th>Пользователь</th><th>Роль</th><th class="num">Заказы</th><th class="num">Потратил</th><th>Последний заказ</th>
+        </tr></thead>
+        <tbody>
+          ${data.users.map((u) => `
+            <tr>
+              <td><strong>${esc(u.name)}</strong><div class="muted" style="font-size:13px">${esc(u.email)} · с ${date(u.created_at)}</div></td>
+              <td>${u.id === me
+                ? `${ROLE_LABEL[u.role]} <span class="muted" style="font-size:13px">(вы)</span>`
+                : `<select class="input" data-user="${u.id}" aria-label="Роль ${esc(u.name)}" style="width:auto">
+                    ${Object.keys(ROLE_LABEL).map((r) => `<option value="${r}" ${r === u.role ? "selected" : ""}>${ROLE_LABEL[r]}</option>`).join("")}
+                  </select>`}</td>
+              <td class="num">${u.orders}</td>
+              <td class="num">${u.spent > 0 ? money(u.spent) : "—"}</td>
+              <td class="muted">${u.last_order_at ? date(u.last_order_at) : "—"}</td>
+            </tr>`).join("") || '<tr><td colspan="5" class="muted">Никого не нашлось</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+    <div class="filters" style="margin-top:16px">
+      <span class="label">${from}–${to} из ${data.total}</span>
+      <button class="btn btn-ghost btn-sm" id="users-prev" ${usersView.offset === 0 ? "disabled" : ""}>← Назад</button>
+      <button class="btn btn-ghost btn-sm" id="users-next" ${to >= data.total ? "disabled" : ""}>Дальше →</button>
+    </div>
+    <p class="muted" style="font-size:14px">Новая роль начинает работать, когда пользователь выйдет и войдёт снова.</p>`;
+
+  let timer;
+  const search = document.getElementById("users-q");
+  search.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      usersView.q = search.value.trim();
+      usersView.offset = 0;
+      renderUsers().then(() => {
+        const input = document.getElementById("users-q");
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      });
+    }, 300);
+  });
+
+  main.querySelectorAll("[data-role]").forEach((chip) => chip.addEventListener("click", () => {
+    usersView.role = chip.dataset.role;
+    usersView.offset = 0;
+    renderUsers();
+  }));
+  document.getElementById("users-prev").addEventListener("click", () => {
+    usersView.offset = Math.max(0, usersView.offset - USERS_PAGE);
+    renderUsers();
+  });
+  document.getElementById("users-next").addEventListener("click", () => {
+    usersView.offset += USERS_PAGE;
+    renderUsers();
+  });
+
+  main.querySelector("tbody").addEventListener("change", async (e) => {
+    const select = e.target.closest("[data-user]");
+    if (!select) return;
+    const u = data.users.find((x) => x.id === Number(select.dataset.user));
+    const role = select.value;
+    if (!confirm(`${u.name}: «${ROLE_LABEL[u.role]}» → «${ROLE_LABEL[role]}»?`)) {
+      select.value = u.role;
+      return;
+    }
+    try {
+      await API.request("PATCH", `/admin/users/${u.id}/role`, { role });
+      UI.toast(`${u.name} теперь ${ROLE_LABEL[role].toLowerCase()}`, "success");
+      renderUsers();
+    } catch (error) {
+      select.value = u.role;
+      UI.toast(adminError(error), "error");
+    }
+  });
 }
 
 // ---------- Маршрутизация ----------

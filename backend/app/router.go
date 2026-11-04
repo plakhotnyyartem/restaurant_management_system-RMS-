@@ -63,6 +63,8 @@ func NewRouter(db *pgxpool.Pool, bot *handlers.TelegramBot) *gin.Engine {
 		Analytics: analyticsHandler,
 	}
 
+	userHandler := &handlers.UserHandler{DB: db}
+
 	assistantHandler := &handlers.AssistantHandler{
 		Analytics: analyticsHandler,
 		Inventory: inventoryHandler,
@@ -171,6 +173,10 @@ func NewRouter(db *pgxpool.Pool, bot *handlers.TelegramBot) *gin.Engine {
 	admin.PUT("/dishes/:id", dishHandler.UpdateDish)
 	admin.PATCH("/dishes/:id/availability", dishHandler.SetAvailability)
 	admin.DELETE("/dishes/:id", dishHandler.DeleteDish)
+
+	// Users and staff roles
+	admin.GET("/users", userHandler.ListUsers)
+	admin.PATCH("/users/:id/role", userHandler.SetRole)
 
 	admin.GET("/test", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
