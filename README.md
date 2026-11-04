@@ -111,6 +111,8 @@ pending → confirmed → preparing → ready → completed
 | POST / PUT / DELETE | `/api/admin/ingredients`, `/api/admin/ingredients/:id` | admin |
 | POST | `/api/admin/assistant` — вопрос ИИ-ассистенту | admin, owner |
 | GET / POST / PUT / DELETE | `/api/admin/promo`, `/api/admin/promo/:id` — промокоды | admin, owner |
+| GET | `/api/admin/users?q=&role=&limit=&offset=` — пользователи: заказы, сумма, поиск | admin |
+| PATCH | `/api/admin/users/:id/role` — сменить роль (не свою и не у последнего админа) | admin |
 | GET / POST / DELETE | `/api/telegram`, `/api/telegram/link` — привязка Telegram | авторизованные |
 
 ## Модуль аналитики и поддержки решений
@@ -261,5 +263,4 @@ cd backend && go test ./...
 
 ## Дальше
 
-- опубликовать репозиторий на GitHub;
-- управление пользователями и ролями в админке (RM-10).
+- проверять роль по базе при каждом запросе, чтобы смена роли действовала сразу, а не после повторного входа.

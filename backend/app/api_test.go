@@ -966,3 +966,41 @@ func TestPromoLastUseRace(t *testing.T) {
 		t.Fatalf("%d orders got the single-use promo (codes %v), want exactly 1", created, codes)
 	}
 }
+
+// ---------- users ----------
+
+func TestUsersListAndRoles(t *testing.T) {
+	needDB(t)
+	adminID, admin := createUser(t, "admin")
+	userID, _ := createUser(t, "customer")
+	_, owner := createUser(t, "owner")
+
+	var email string
+	testDB.QueryRow(context.Background(), `SELECT email FROM users WHERE id = $1`, userID).Scan(&email)
+
+	// Search by part of the email, case-insensitive.
+	list := request(t, "GET", "/api/admin/users?q="+strings.ToUpper(email[:20]), admin, nil)
+	expect(t, list, http.StatusOK, "list users")
+	users := list.Body["users"].([]any)
+	if len(users) != 1 || users[0].(map[string]any)["email"] != email || list.Body["total"].(float64) != 1 {
+		t.Fatalf("search = %s", list.Raw)
+	}
+	if list.Body["roles"].(map[string]any)["admin"].(float64) < 1 {
+		t.Fatalf("role counts = %v", list.Body["roles"])
+	}
+	expect(t, request(t, "GET", "/api/admin/users?role=chef", admin, nil), http.StatusBadRequest, "unknown role filter")
+	expect(t, request(t, "GET", "/api/admin/users", owner, nil), http.StatusForbidden, "owner cannot list users")
+
+	path := fmt.Sprintf("/api/admin/users/%d/role", userID)
+	changed := request(t, "PATCH", path, admin, map[string]any{"role": "waiter"})
+	expect(t, changed, http.StatusOK, "make waiter")
+	if changed.Body["role"] != "waiter" {
+		t.Fatalf("changed = %s", changed.Raw)
+	}
+	expect(t, request(t, "PATCH", path, admin, map[string]any{"role": "chef"}), http.StatusBadRequest, "unknown role")
+	expect(t, request(t, "PATCH", path, owner, map[string]any{"role": "admin"}), http.StatusForbidden, "owner cannot change roles")
+	expect(t, request(t, "PATCH", "/api/admin/users/999999999/role", admin, map[string]any{"role": "cook"}), http.StatusNotFound, "missing user")
+	expect(t, request(t, "PATCH", fmt.Sprintf("/api/admin/users/%d/role", adminID), admin, map[string]any{"role": "customer"}),
+		http.StatusBadRequest, "own role")
+}
+
