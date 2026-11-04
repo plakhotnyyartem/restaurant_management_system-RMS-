@@ -83,10 +83,11 @@ func TestAssistantTools(t *testing.T) {
 }
 
 // TestAssistantNotConfigured: without an API key the endpoint must answer 503
-// with a clear message instead of trying to call the API.
+// with a clear message instead of trying to call the API (no Claude or Gemini key).
 func TestAssistantNotConfigured(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("AI_API_KEY", "")
 	gin.SetMode(gin.TestMode)
 
 	h := &AssistantHandler{}

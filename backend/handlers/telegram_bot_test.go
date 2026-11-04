@@ -343,6 +343,7 @@ func TestBotCommandRoles(t *testing.T) {
 func TestBotFreeTextGoesToAssistant(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("AI_API_KEY", "")
 	f := newBotFixture(t)
 	_, customer := f.linked(t, "customer")
 	_, owner := f.linked(t, "owner")

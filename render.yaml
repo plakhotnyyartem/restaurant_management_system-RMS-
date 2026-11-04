@@ -16,6 +16,8 @@ services:
         generateValue: true
       - key: TELEGRAM_BOT_TOKEN    # можно оставить пустым — бот просто выключится
         sync: false
+      - key: AI_API_KEY            # бесплатный ключ Gemini для ИИ-ассистента (или ANTHROPIC_API_KEY)
+        sync: false
       - key: ANTHROPIC_API_KEY     # можно оставить пустым — ИИ-ассистент ответит 503
         sync: false
       - key: DIGEST_HOUR

@@ -848,7 +848,7 @@ func (b *TelegramBot) freeText(ctx context.Context, m *telegram.Message, user *b
 		return
 	}
 	if !b.Assistant.configured() {
-		b.send(ctx, m.Chat.ID, "🤖 ИИ-ассистент ещё не подключён на сервере (нужен ANTHROPIC_API_KEY). "+
+		b.send(ctx, m.Chat.ID, "🤖 ИИ-ассистент ещё не подключён на сервере (нужен AI_API_KEY или ANTHROPIC_API_KEY). "+
 			"Пока можно пользоваться командами: /today /forecast /stock /promo")
 		return
 	}

@@ -4,7 +4,7 @@
 она не только принимает заказы, но и сама подсказывает владельцу,
 что рекламировать, где поднять цену, какое комбо предложить и когда усилить смену.
 
-**Стек:** Go + Gin · PostgreSQL (pgx) · JWT + bcrypt · HTML/CSS/JavaScript (fetch, SVG-графики без библиотек) · Claude API (ИИ-ассистент) · Telegram Bot API
+**Стек:** Go + Gin · PostgreSQL (pgx) · JWT + bcrypt · HTML/CSS/JavaScript (fetch, SVG-графики без библиотек) · Claude API или бесплатный Gemini (ИИ-ассистент) · Telegram Bot API
 
 ## Запуск
 
@@ -181,14 +181,19 @@ pending → confirmed → preparing → ready → completed
 KPI, инженерия меню, прогноз, план закупок (симплекс), анализ корзин, загрузка по часам, рекомендации.
 Поэтому любая цифра в ответе совпадает с графиками, а под ответом видно, из каких расчётов она взята.
 
-Подключение — ключ Claude API (console.anthropic.com → API Keys) в `backend/.env`,
-в коде и в git ключа нет:
+Подключение — один ключ в `backend/.env` (в коде и в git ключа нет), затем перезапуск сервера:
 
 ```bash
+# бесплатно: Google Gemini (aistudio.google.com → Get API key)
+AI_API_KEY=...
+# или платно: Claude API (console.anthropic.com → API Keys); если задан, используется он
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-После этого перезапустите сервер.
+Без Claude ассистент обращается к любому OpenAI-совместимому API (`/chat/completions` с tool calls)
+и сам ведёт цикл «модель → инструменты → модель» (`assistant_compat.go`). По умолчанию это Gemini
+(`gemini-flash-latest`); Groq, OpenRouter и др. — через `AI_BASE_URL` и `AI_MODEL`.
+На Render ключ задаётся в Environment → `AI_API_KEY`.
 
 Без ключа ассистент отвечает `503` с понятным сообщением, остальная система работает как обычно.
 Код: `backend/handlers/assistant.go`, тесты инструментов на реальной базе: `assistant_test.go`.
