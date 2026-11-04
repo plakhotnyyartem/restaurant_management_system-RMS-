@@ -31,11 +31,19 @@ type AssistantHandler struct {
 
 	once   sync.Once
 	client anthropic.Client
+
+	busyMu    sync.Mutex // overloaded free models, see compatChatRetry
+	busyUntil map[string]time.Time
 }
 
 // configured reports whether an API key is available. Without it the endpoint
 // answers 503 instead of failing on every request.
 func (h *AssistantHandler) configured() bool {
+	return h.useClaude() || compatKey() != ""
+}
+
+// useClaude: a Claude key wins; otherwise the free compatible API (assistant_compat.go).
+func (h *AssistantHandler) useClaude() bool {
 	return os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("ANTHROPIC_AUTH_TOKEN") != ""
 }
 
@@ -227,6 +235,39 @@ func (h *AssistantHandler) answer(ctx context.Context, messages []assistantMessa
 		return "", nil, errAssistantNotConfigured
 	}
 
+	var used []string
+	tools, err := h.tools(&used)
+	if err != nil {
+		return "", nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+
+	var reply string
+	if h.useClaude() {
+		reply, err = h.claudeAnswer(ctx, messages, tools)
+	} else {
+		reply, err = h.compatAnswer(ctx, messages, tools)
+	}
+	if err != nil {
+		return "", nil, err
+	}
+
+	// Unique tool titles in call order.
+	seen := map[string]bool{}
+	titles := []string{}
+	for _, name := range used {
+		if !seen[name] {
+			seen[name] = true
+			titles = append(titles, toolTitles[name])
+		}
+	}
+	return strings.TrimSpace(reply), titles, nil
+}
+
+// claudeAnswer runs the question through Claude with the SDK's tool runner.
+func (h *AssistantHandler) claudeAnswer(ctx context.Context, messages []assistantMessage, tools []anthropic.BetaTool) (string, error) {
 	var history []anthropic.BetaMessageParam
 	for _, m := range messages {
 		block := anthropic.NewBetaTextBlock(m.Content)
@@ -239,15 +280,6 @@ func (h *AssistantHandler) answer(ctx context.Context, messages []assistantMessa
 			})
 		}
 	}
-
-	var used []string
-	tools, err := h.tools(&used)
-	if err != nil {
-		return "", nil, err
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-	defer cancel()
 
 	today := time.Now().Format("02.01.2006")
 	runner := h.api().Beta.Messages.NewToolRunner(tools, anthropic.BetaToolRunnerParams{
@@ -270,10 +302,10 @@ func (h *AssistantHandler) answer(ctx context.Context, messages []assistantMessa
 
 	message, err := runner.RunToCompletion(ctx)
 	if err != nil {
-		return "", nil, err
+		return "", err
 	}
 	if message.StopReason == anthropic.BetaStopReasonRefusal {
-		return refusalReply, []string{}, nil
+		return refusalReply, nil
 	}
 
 	var reply strings.Builder
@@ -285,28 +317,27 @@ func (h *AssistantHandler) answer(ctx context.Context, messages []assistantMessa
 	if message.StopReason == anthropic.BetaStopReasonToolUse {
 		reply.WriteString("\n\n(Ответ получился слишком длинным по шагам — уточните вопрос.)")
 	}
-
-	// Unique tool titles in call order.
-	seen := map[string]bool{}
-	titles := []string{}
-	for _, name := range used {
-		if !seen[name] {
-			seen[name] = true
-			titles = append(titles, toolTitles[name])
-		}
-	}
-	return strings.TrimSpace(reply.String()), titles, nil
+	return reply.String(), nil
 }
 
 // assistantErrorStatus turns an API error into a short human message (for any client).
 func assistantErrorStatus(err error) (int, string) {
+	status := 0
 	var apiErr *anthropic.Error
+	var compatErr *compatError
+	if errors.As(err, &apiErr) {
+		status = apiErr.StatusCode
+	} else if errors.As(err, &compatErr) {
+		status = compatErr.StatusCode
+	}
 	switch {
 	case errors.Is(err, errAssistantNotConfigured):
-		return http.StatusServiceUnavailable, "assistant is not configured: set ANTHROPIC_API_KEY for the server"
-	case errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusUnauthorized:
+		return http.StatusServiceUnavailable, "assistant is not configured: set AI_API_KEY (free Gemini key) or ANTHROPIC_API_KEY for the server"
+	// Gemini answers 400 (not 401) to a wrong key.
+	case status == http.StatusUnauthorized || status == http.StatusForbidden ||
+		(compatErr != nil && status == http.StatusBadRequest && strings.Contains(compatErr.Body, "API_KEY_INVALID")):
 		return http.StatusServiceUnavailable, "assistant API key is invalid"
-	case errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusTooManyRequests:
+	case status == http.StatusTooManyRequests || (compatErr != nil && compatErr.overloaded()):
 		return http.StatusTooManyRequests, "assistant is busy, try again in a minute"
 	case errors.Is(err, context.DeadlineExceeded):
 		return http.StatusGatewayTimeout, "assistant took too long to answer"

@@ -665,7 +665,7 @@ async function askAssistant(question) {
     chatHistory.push({ role: "assistant", content: result.reply || "…", tools: result.tools });
   } catch (error) {
     const text = error.status === 503
-      ? "Ассистент ещё не подключён: на сервере не задан ключ ANTHROPIC_API_KEY. Инструкция — в README, раздел «ИИ-ассистент»."
+      ? "Ассистент ещё не подключён: на сервере не задан ключ AI_API_KEY (бесплатный ключ Gemini) или ANTHROPIC_API_KEY. Инструкция — в README, раздел «ИИ-ассистент»."
       : error.status === 429
         ? "Ассистент сейчас перегружен — попробуйте через минуту."
         : "Не получилось получить ответ: " + error.message;
@@ -692,7 +692,7 @@ async function renderAssistant() {
       </form>
     </div>
     <p class="muted" style="font-size:13px;margin-top:10px">
-      Модель Claude вызывает инструменты системы (KPI, инженерия меню, прогноз, закупки, анализ корзин, загрузка)
+      ИИ-модель (Gemini или Claude) вызывает инструменты системы (KPI, инженерия меню, прогноз, закупки, анализ корзин, загрузка)
       и объясняет результат. Enter — отправить, Shift+Enter — новая строка.
     </p>`;
 
