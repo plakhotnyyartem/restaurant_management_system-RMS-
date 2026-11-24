@@ -131,6 +131,31 @@ const API = {
     return data;
   },
   get(path) { return this.request("GET", path); },
+
+  // Скачивает файл (например, Excel-отчёт) с токеном авторизации.
+  // Имя файла берётся из Content-Disposition, который задаёт сервер.
+  async download(path, fallbackName) {
+    const headers = {};
+    const token = Auth.token();
+    if (token) headers.Authorization = "Bearer " + token;
+    const response = await fetch("/api" + path, { headers });
+    if (!response.ok) {
+      let data = null;
+      try { data = await response.json(); } catch {}
+      const error = new Error(data?.error || "HTTP " + response.status);
+      error.status = response.status;
+      throw error;
+    }
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename\*=UTF-8''([^;]+)/);
+    const name = match ? decodeURIComponent(match[1]) : fallbackName;
+    const url = URL.createObjectURL(await response.blob());
+    const link = Object.assign(document.createElement("a"), { href: url, download: name });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
   post(path, body) { return this.request("POST", path, body); },
   put(path, body) { return this.request("PUT", path, body); },
   delete(path) { return this.request("DELETE", path); },

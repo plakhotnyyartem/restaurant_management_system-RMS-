@@ -151,15 +151,45 @@ function recCard(r, i = 0) {
 
 let analyticsDays = 30;
 
+// Заголовок раздела с кнопкой «Скачать Excel».
+function excelHead(title) {
+  return `
+    <div class="section-head" style="margin-bottom:16px">
+      <h2 style="margin:0">${title}</h2>
+      <button class="btn btn-ghost btn-sm" data-excel>Скачать Excel</button>
+    </div>`;
+}
+
+// Вешает на кнопку из excelHead загрузку файла; path вычисляется в момент клика,
+// чтобы в файл попали текущие период, бюджет и т. п.
+function bindExcel(path, fallbackName) {
+  const button = main.querySelector("[data-excel]");
+  if (!button) return;
+  button.addEventListener("click", async () => {
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = "Готовим файл…";
+    try {
+      await API.download(path(), fallbackName);
+    } catch (error) {
+      UI.toast("Не получилось скачать: " + adminError(error), "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = label;
+    }
+  });
+}
+
 async function renderAnalytics() {
   const periods = [7, 30, 90, 180];
   main.innerHTML = `
-    <h2>Аналитика и рекомендации</h2>
+    ${excelHead("Аналитика и рекомендации")}
     <div class="filters">
       <span class="label">Период:</span>
       ${periods.map((d) => `<button class="chip ${d === analyticsDays ? "active" : ""}" data-days="${d}">${d} дн.</button>`).join("")}
     </div>
     <div id="analytics-body"><div class="skeleton" style="height:300px"></div></div>`;
+  bindExcel(() => `/admin/export/analytics?days=${analyticsDays}`, "Аналитика_RMS.xlsx");
 
   main.querySelector(".filters").addEventListener("click", (e) => {
     const chip = e.target.closest("[data-days]");
@@ -366,7 +396,7 @@ let lastPlan = null;
 
 async function renderPurchasing() {
   main.innerHTML = `
-    <h2>Оптимизация закупок</h2>
+    ${excelHead("Оптимизация закупок")}
     <div class="filters" id="plan-filters">
       <span class="label">Бюджет на неделю:</span>
       <input class="input" id="plan-budget" type="number" min="0" step="10000" style="width:160px" placeholder="авто">
@@ -378,6 +408,7 @@ async function renderPurchasing() {
       <button class="btn btn-sm" id="plan-run">Рассчитать</button>
     </div>
     <div id="plan-body"><div class="skeleton" style="height:300px"></div></div>`;
+  bindExcel(() => `/admin/export/purchasing?budget=${purchaseBudget}&safety=${purchaseSafety}`, "Закупки_RMS.xlsx");
 
   document.getElementById("plan-run").addEventListener("click", () => {
     purchaseBudget = Number(document.getElementById("plan-budget").value) || 0;
@@ -538,7 +569,7 @@ async function renderInventory() {
   const low = rows.filter((r) => r.status === "low").length;
 
   main.innerHTML = `
-    <h2>Склад</h2>
+    ${excelHead("Склад")}
     <div class="stats">
       <div class="stat"><span>Позиций</span><strong>${rows.length}</strong><small>продуктов в техкартах</small></div>
       <div class="stat"><span>Заканчиваются</span><strong>${critical}</strong><small>хватит меньше чем на 2 дня</small></div>
@@ -569,6 +600,7 @@ async function renderInventory() {
       </table>
     </div>
     ${canEdit ? '<p class="muted" style="font-size:13px">Измените остаток и нажмите Enter — так фиксируется инвентаризация. Продукты списываются автоматически, когда повар начинает готовить заказ.</p>' : ""}`;
+  bindExcel(() => "/admin/export/inventory", "Склад_RMS.xlsx");
 
   main.querySelector(".filters").addEventListener("click", (e) => {
     const chip = e.target.closest("[data-inv]");
@@ -738,12 +770,13 @@ async function renderOrders() {
     ["ready", "Готовы"], ["completed", "Выполнены"], ["cancelled", "Отменены"],
   ];
   main.innerHTML = `
-    <h2>Заказы</h2>
+    ${role === "admin" ? excelHead("Заказы") : "<h2>Заказы</h2>"}
     <div class="filters">
       ${filters.map(([k, label]) => `<button class="chip ${k === ordersFilter ? "active" : ""}" data-filter="${k}">${label}</button>`).join("")}
       <span class="muted" style="font-size:13px;margin-left:auto" id="orders-updated"></span>
     </div>
     <div id="orders-board"></div>`;
+  bindExcel(() => "/admin/export/orders?days=30", "Заказы_RMS.xlsx");
 
   main.querySelector(".filters").addEventListener("click", (e) => {
     const chip = e.target.closest("[data-filter]");

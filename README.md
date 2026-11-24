@@ -111,6 +111,9 @@ pending → confirmed → preparing → ready → completed
 | POST / PUT / DELETE | `/api/admin/ingredients`, `/api/admin/ingredients/:id` | admin |
 | POST | `/api/admin/assistant` — вопрос ИИ-ассистенту | admin, owner |
 | GET / POST / PUT / DELETE | `/api/admin/promo`, `/api/admin/promo/:id` — промокоды | admin, owner |
+| GET | `/api/admin/export/analytics?days=N`, `/purchasing?budget=N&safety=10` — Excel (.xlsx) | admin, owner |
+| GET | `/api/admin/export/inventory` — Excel со складом | admin, owner, cook |
+| GET | `/api/admin/export/orders?days=N` — Excel с заказами и позициями | admin |
 | GET | `/api/admin/users?q=&role=&limit=&offset=` — пользователи: заказы, сумма, поиск | admin |
 | PATCH | `/api/admin/users/:id/role` — сменить роль (не свою и не у последнего админа) | admin |
 | GET / POST / DELETE | `/api/telegram`, `/api/telegram/link` — привязка Telegram | авторизованные |

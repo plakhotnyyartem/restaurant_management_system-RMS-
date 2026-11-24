@@ -65,6 +65,12 @@ func NewRouter(db *pgxpool.Pool, bot *handlers.TelegramBot) *gin.Engine {
 
 	userHandler := &handlers.UserHandler{DB: db}
 
+	exportHandler := &handlers.ExportHandler{
+		Analytics: analyticsHandler,
+		Inventory: inventoryHandler,
+		Orders:    orderHandler,
+	}
+
 	assistantHandler := &handlers.AssistantHandler{
 		Analytics: analyticsHandler,
 		Inventory: inventoryHandler,
@@ -126,6 +132,13 @@ func NewRouter(db *pgxpool.Pool, bot *handlers.TelegramBot) *gin.Engine {
 	analytics.GET("/recommendations", analyticsHandler.Recommendations)
 	analytics.GET("/forecast", analyticsHandler.Forecast)
 	analytics.GET("/purchasing", inventoryHandler.PurchasePlan)
+
+	// Excel downloads of the same reports
+	export := protected.Group("/admin/export")
+	export.GET("/analytics", handlers.RequireRole("admin", "owner"), exportHandler.ExportAnalytics)
+	export.GET("/purchasing", handlers.RequireRole("admin", "owner"), exportHandler.ExportPurchasing)
+	export.GET("/inventory", handlers.RequireRole("admin", "owner", "cook"), exportHandler.ExportInventory)
+	export.GET("/orders", handlers.RequireRole("admin"), exportHandler.ExportOrders)
 
 	// AI assistant: explains the analytics above in plain language
 	assistant := protected.Group("/admin/assistant")

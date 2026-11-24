@@ -24,6 +24,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/xuri/excelize/v2"
 	"golang.org/x/crypto/bcrypt"
 
 	"restaurant-management/config"
@@ -1004,3 +1005,47 @@ func TestUsersListAndRoles(t *testing.T) {
 		http.StatusBadRequest, "own role")
 }
 
+
+// ---------- Excel export ----------
+
+func TestExcelExport(t *testing.T) {
+	needDB(t)
+	_, admin := createUser(t, "admin")
+	_, owner := createUser(t, "owner")
+	_, cook := createUser(t, "cook")
+	_, customer := createUser(t, "customer")
+
+	cases := []struct {
+		token, path string
+		want        int
+		sheets      []string
+	}{
+		{admin, "/api/admin/export/analytics?days=30", 200, []string{"Сводка", "Продажи по дням", "Инженерия меню", "Что берут вместе"}},
+		{owner, "/api/admin/export/purchasing?budget=300000", 200, []string{"Итог", "Список закупки", "Обеспечение блюд"}},
+		{cook, "/api/admin/export/inventory", 200, []string{"Склад"}},
+		{admin, "/api/admin/export/orders?days=7", 200, []string{"Заказы", "Позиции"}},
+		{owner, "/api/admin/export/orders?days=7", 403, nil},
+		{cook, "/api/admin/export/analytics", 403, nil},
+		{customer, "/api/admin/export/inventory", 403, nil},
+		{"", "/api/admin/export/inventory", 401, nil},
+	}
+	for _, tc := range cases {
+		res := request(t, "GET", tc.path, tc.token, nil)
+		expect(t, res, tc.want, tc.path)
+		if tc.want != 200 {
+			continue
+		}
+		f, err := excelize.OpenReader(strings.NewReader(res.Raw))
+		if err != nil {
+			t.Fatalf("%s: not an xlsx file: %v", tc.path, err)
+		}
+		if got := f.GetSheetList(); strings.Join(got, "|") != strings.Join(tc.sheets, "|") {
+			t.Fatalf("%s: sheets %v, want %v", tc.path, got, tc.sheets)
+		}
+		header, _ := f.GetCellValue(tc.sheets[0], "A1")
+		if header == "" {
+			t.Fatalf("%s: empty header", tc.path)
+		}
+		f.Close()
+	}
+}

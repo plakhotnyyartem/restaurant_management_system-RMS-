@@ -137,10 +137,10 @@ type dayPoint struct {
 	Revenue float64 `json:"revenue"`
 }
 
-// Sales — GET /api/admin/analytics/sales?days=30
+// sales returns orders and revenue for each of the last `days` days.
 // generate_series fills days without orders with zeros, so the chart has no gaps.
-func (h *AnalyticsHandler) Sales(c *gin.Context) {
-	rows, err := h.DB.Query(c,
+func (h *AnalyticsHandler) sales(ctx context.Context, days int) ([]dayPoint, error) {
+	rows, err := h.DB.Query(ctx,
 		`SELECT to_char(d, 'YYYY-MM-DD'),
 		        count(o.id),
 		        COALESCE(sum(o.total_price), 0)
@@ -150,11 +150,10 @@ func (h *AnalyticsHandler) Sales(c *gin.Context) {
 		       AND o.status <> 'cancelled'
 		 GROUP BY d
 		 ORDER BY d`,
-		periodDays(c),
+		days,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get sales"})
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -162,10 +161,19 @@ func (h *AnalyticsHandler) Sales(c *gin.Context) {
 	for rows.Next() {
 		var p dayPoint
 		if err := rows.Scan(&p.Date, &p.Orders, &p.Revenue); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read sales"})
-			return
+			return nil, err
 		}
 		points = append(points, p)
+	}
+	return points, rows.Err()
+}
+
+// Sales — GET /api/admin/analytics/sales?days=30
+func (h *AnalyticsHandler) Sales(c *gin.Context) {
+	points, err := h.sales(c, periodDays(c))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get sales"})
+		return
 	}
 	c.JSON(http.StatusOK, points)
 }
