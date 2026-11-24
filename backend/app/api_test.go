@@ -1005,7 +1005,6 @@ func TestUsersListAndRoles(t *testing.T) {
 		http.StatusBadRequest, "own role")
 }
 
-
 // ---------- Excel export ----------
 
 func TestExcelExport(t *testing.T) {
@@ -1024,6 +1023,16 @@ func TestExcelExport(t *testing.T) {
 		{owner, "/api/admin/export/purchasing?budget=300000", 200, []string{"Итог", "Список закупки", "Обеспечение блюд"}},
 		{cook, "/api/admin/export/inventory", 200, []string{"Склад"}},
 		{admin, "/api/admin/export/orders?days=7", 200, []string{"Заказы", "Позиции"}},
+		{owner, "/api/admin/export/dashboard", 200, []string{"KPI за 7 дней", "Выручка за 14 дней", "Рекомендации"}},
+		{owner, "/api/admin/export/forecast", 200, []string{"Прогноз на 14 дней", "Порции по блюдам", "История", "Модель"}},
+		{owner, "/api/admin/export/promo", 200, []string{"Промокоды"}},
+		{cook, "/api/admin/export/recipes", 200, []string{"Техкарты"}},
+		{admin, "/api/admin/export/dishes", 200, []string{"Блюда"}},
+		{admin, "/api/admin/export/categories", 200, []string{"Категории"}},
+		{admin, "/api/admin/export/users", 200, []string{"Пользователи"}},
+		{customer, "/api/export/my-orders", 200, []string{"Мои заказы"}},
+		{owner, "/api/admin/export/users", 403, nil},
+		{cook, "/api/admin/export/dishes", 403, nil},
 		{owner, "/api/admin/export/orders?days=7", 403, nil},
 		{cook, "/api/admin/export/analytics", 403, nil},
 		{customer, "/api/admin/export/inventory", 403, nil},

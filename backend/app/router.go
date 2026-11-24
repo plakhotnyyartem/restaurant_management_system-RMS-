@@ -66,6 +66,7 @@ func NewRouter(db *pgxpool.Pool, bot *handlers.TelegramBot) *gin.Engine {
 	userHandler := &handlers.UserHandler{DB: db}
 
 	exportHandler := &handlers.ExportHandler{
+		DB:        db,
 		Analytics: analyticsHandler,
 		Inventory: inventoryHandler,
 		Orders:    orderHandler,
@@ -139,6 +140,14 @@ func NewRouter(db *pgxpool.Pool, bot *handlers.TelegramBot) *gin.Engine {
 	export.GET("/purchasing", handlers.RequireRole("admin", "owner"), exportHandler.ExportPurchasing)
 	export.GET("/inventory", handlers.RequireRole("admin", "owner", "cook"), exportHandler.ExportInventory)
 	export.GET("/orders", handlers.RequireRole("admin"), exportHandler.ExportOrders)
+	export.GET("/dashboard", handlers.RequireRole("admin", "owner"), exportHandler.ExportDashboard)
+	export.GET("/forecast", handlers.RequireRole("admin", "owner"), exportHandler.ExportForecast)
+	export.GET("/promo", handlers.RequireRole("admin", "owner"), exportHandler.ExportPromos)
+	export.GET("/recipes", handlers.RequireRole("admin", "cook"), exportHandler.ExportRecipes)
+	export.GET("/dishes", handlers.RequireRole("admin"), exportHandler.ExportDishes)
+	export.GET("/categories", handlers.RequireRole("admin"), exportHandler.ExportCategories)
+	export.GET("/users", handlers.RequireRole("admin"), exportHandler.ExportUsers)
+	protected.GET("/export/my-orders", exportHandler.ExportMyOrders)
 
 	// AI assistant: explains the analytics above in plain language
 	assistant := protected.Group("/admin/assistant")

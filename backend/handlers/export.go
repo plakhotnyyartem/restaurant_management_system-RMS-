@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -18,6 +19,7 @@ import (
 // matches what the owner sees on screen.
 
 type ExportHandler struct {
+	DB        *pgxpool.Pool
 	Analytics *AnalyticsHandler
 	Inventory *InventoryHandler
 	Orders    *OrderHandler
@@ -351,4 +353,304 @@ func (h *ExportHandler) ExportInventory(c *gin.Context) {
 		return
 	}
 	b.send(c, "Склад_RMS", "RMS_inventory")
+}
+
+var roleRu = map[string]string{
+	"customer": "Клиент", "waiter": "Официант", "cook": "Повар", "owner": "Владелец", "admin": "Администратор",
+}
+
+var recommendationRu = map[string]string{
+	"promote": "Реклама", "price": "Цена", "remove": "Убрать", "combo": "Комбо",
+	"staff": "Персонал", "trend": "Тренд", "forecast": "Прогноз",
+}
+
+// queryRows runs a query and returns every row as []any, for simple sheets
+// whose columns map one-to-one to SQL columns.
+func (h *ExportHandler) queryRows(c *gin.Context, sql string, args ...any) ([][]any, error) {
+	rows, err := h.DB.Query(c.Request.Context(), sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := [][]any{}
+	for rows.Next() {
+		values, err := rows.Values()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, values)
+	}
+	return out, rows.Err()
+}
+
+// one builds a single-sheet workbook and sends it.
+func (h *ExportHandler) one(c *gin.Context, sheet string, cols []column, rows [][]any, nameRu, nameASCII string) {
+	b, err := newWorkbook()
+	if err == nil {
+		err = b.sheet(sheet, cols, rows)
+	}
+	if err != nil {
+		exportFailed(c)
+		return
+	}
+	b.send(c, nameRu, nameASCII)
+}
+
+// ExportDashboard — GET /api/admin/export/dashboard
+// The dashboard: KPI for 7 days, revenue for 14 days and today's recommendations.
+func (h *ExportHandler) ExportDashboard(c *gin.Context) {
+	ctx := c.Request.Context()
+	cur, err1 := h.Analytics.stats(ctx, 7, 0)
+	prev, err2 := h.Analytics.stats(ctx, 14, 7)
+	sales, err3 := h.Analytics.sales(ctx, 14)
+	recs, err4 := h.Analytics.recommendations(ctx, 30)
+	for _, err := range []error{err1, err2, err3, err4} {
+		if err != nil {
+			exportFailed(c)
+			return
+		}
+	}
+	b, err := newWorkbook()
+	if err != nil {
+		exportFailed(c)
+		return
+	}
+	change := func(cur, prev float64) any {
+		if g := growth(cur, prev); g != nil {
+			return *g
+		}
+		return "—"
+	}
+	kpi := [][]any{
+		{"Выручка, ₸", cur.Revenue, prev.Revenue, change(cur.Revenue, prev.Revenue)},
+		{"Заказы", cur.Orders, prev.Orders, change(float64(cur.Orders), float64(prev.Orders))},
+		{"Средний чек, ₸", cur.AvgCheck, prev.AvgCheck, change(cur.AvgCheck, prev.AvgCheck)},
+		{"Валовая прибыль, ₸", cur.Margin, prev.Margin, change(cur.Margin, prev.Margin)},
+	}
+	salesRows := make([][]any, len(sales))
+	for i, p := range sales {
+		salesRows[i] = []any{p.Date, p.Orders, p.Revenue}
+	}
+	recRows := make([][]any, len(recs))
+	for i, r := range recs {
+		recRows[i] = []any{r.Priority, recommendationRu[r.Type], r.Title, r.Detail}
+	}
+	steps := []error{
+		b.sheet("KPI за 7 дней", []column{{"Показатель", 24, colText}, {"Последние 7 дней", 18, colNumber},
+			{"Прошлые 7 дней", 18, colNumber}, {"Изменение, %", 15, colPct}}, kpi),
+		b.sheet("Выручка за 14 дней", []column{{"Дата", 14, colText}, {"Заказы", 12, colInt}, {"Выручка", 16, colMoney}}, salesRows),
+		b.sheet("Рекомендации", []column{{"Приоритет", 11, colInt}, {"Тип", 12, colText}, {"Что сделать", 45, colText},
+			{"Почему", 90, colText}}, recRows),
+	}
+	for _, err := range steps {
+		if err != nil {
+			exportFailed(c)
+			return
+		}
+	}
+	b.send(c, "Дашборд_RMS", "RMS_dashboard")
+}
+
+// ExportForecast — GET /api/admin/export/forecast
+func (h *ExportHandler) ExportForecast(c *gin.Context) {
+	fc, err := h.Analytics.forecast(c.Request.Context(), 14)
+	if err != nil {
+		exportFailed(c)
+		return
+	}
+	b, err := newWorkbook()
+	if err != nil {
+		exportFailed(c)
+		return
+	}
+	days := make([][]any, len(fc.Forecast))
+	for i, p := range fc.Forecast {
+		wd := ""
+		if p.Weekday >= 1 && p.Weekday <= 7 {
+			wd = weekdayShort[p.Weekday]
+		}
+		days[i] = []any{p.Date, wd, p.Value, p.Low, p.High, p.Revenue}
+	}
+	dishes := make([][]any, len(fc.Dishes))
+	for i, d := range fc.Dishes {
+		dishes[i] = []any{d.Name, d.Category, d.Tomorrow, d.NextWeek, d.LastWeek, d.ChangePct}
+	}
+	history := make([][]any, len(fc.History))
+	for i, p := range fc.History {
+		history[i] = []any{p.Date, p.Value}
+	}
+	model := [][]any{
+		{"Метод", fc.Method},
+		{"Обучено на днях истории", fc.Trained},
+		{"α (уровень)", fc.Params.Alpha},
+		{"β (тренд)", fc.Params.Beta},
+		{"γ (сезонность)", fc.Params.Gamma},
+		{"Средний чек, ₸", fc.AvgCheck},
+	}
+	if bt := fc.Backtest; bt != nil {
+		model = append(model,
+			[]any{"Проверка на последних днях", bt.Days},
+			[]any{"Ошибка модели (MAPE), %", bt.MAPEModel},
+			[]any{"Ошибка наивного прогноза (MAPE), %", bt.MAPENaive},
+			[]any{"RMSE, заказов", bt.RMSE},
+			[]any{"Модель точнее наивного на, %", bt.Improvement})
+	}
+	steps := []error{
+		b.sheet("Прогноз на 14 дней", []column{{"Дата", 13, colText}, {"День", 7, colText}, {"Заказов", 11, colNumber},
+			{"Мин. (80 %)", 12, colNumber}, {"Макс. (80 %)", 12, colNumber}, {"Выручка", 15, colMoney}}, days),
+		b.sheet("Порции по блюдам", []column{{"Блюдо", 22, colText}, {"Категория", 14, colText}, {"Завтра", 10, colNumber},
+			{"Следующие 7 дней", 17, colNumber}, {"Прошлые 7 дней", 16, colNumber}, {"Изменение", 12, colPct}}, dishes),
+		b.sheet("История", []column{{"Дата", 13, colText}, {"Заказов", 11, colInt}}, history),
+		b.sheet("Модель", []column{{"Параметр", 38, colText}, {"Значение", 45, colText}}, model),
+	}
+	for _, err := range steps {
+		if err != nil {
+			exportFailed(c)
+			return
+		}
+	}
+	b.send(c, "Прогноз_RMS", "RMS_forecast")
+}
+
+// ExportPromos — GET /api/admin/export/promo
+func (h *ExportHandler) ExportPromos(c *gin.Context) {
+	rows, err := h.DB.Query(c.Request.Context(), promoSelect+`GROUP BY p.id ORDER BY p.is_active DESC, p.created_at DESC`)
+	if err != nil {
+		exportFailed(c)
+		return
+	}
+	list, err := scanPromos(rows)
+	if err != nil {
+		exportFailed(c)
+		return
+	}
+	data := make([][]any, len(list))
+	for i, p := range list {
+		kind := "Процент"
+		if p.Kind == "fixed" {
+			kind = "Сумма, ₸"
+		}
+		var maxUses, until any = "без лимита", "бессрочно"
+		if p.MaxUses != nil {
+			maxUses = *p.MaxUses
+		}
+		if p.ValidUntil != nil {
+			until = *p.ValidUntil
+		}
+		once, active := "нет", "нет"
+		if p.OncePerUser {
+			once = "да"
+		}
+		if p.IsActive {
+			active = "да"
+		}
+		data[i] = []any{p.Code, kind, p.Value, p.MinTotal, maxUses, once, until, active, p.Uses, p.Discounted, p.Description}
+	}
+	h.one(c, "Промокоды", []column{{"Код", 16, colText}, {"Тип скидки", 12, colText}, {"Размер", 10, colNumber},
+		{"Мин. сумма заказа", 17, colMoney}, {"Лимит использований", 18, colText}, {"Один раз на гостя", 16, colText},
+		{"Действует до", 13, colText}, {"Включён", 9, colText}, {"Использован", 12, colInt},
+		{"Сумма скидок", 14, colMoney}, {"Описание", 40, colText}}, data, "Промокоды_RMS", "RMS_promo")
+}
+
+// ExportDishes — GET /api/admin/export/dishes
+func (h *ExportHandler) ExportDishes(c *gin.Context) {
+	rows, err := h.queryRows(c, `
+		SELECT d.id, d.name, c.name, d.price::float8, COALESCE(d.cost_price, 0)::float8,
+		       (d.price - COALESCE(d.cost_price, 0))::float8,
+		       CASE WHEN d.price > 0 THEN round(COALESCE(d.cost_price, 0) / d.price * 100, 1) ELSE 0 END::float8,
+		       CASE WHEN COALESCE(d.is_available, true) THEN 'в меню' ELSE 'скрыто' END,
+		       CASE WHEN EXISTS (SELECT 1 FROM recipe_items r WHERE r.dish_id = d.id) THEN 'есть' ELSE 'нет' END,
+		       COALESCE(d.description, '')
+		FROM dishes d JOIN categories c ON c.id = d.category_id
+		ORDER BY c.name, d.name`)
+	if err != nil {
+		exportFailed(c)
+		return
+	}
+	h.one(c, "Блюда", []column{{"ID", 6, colInt}, {"Блюдо", 22, colText}, {"Категория", 14, colText}, {"Цена", 12, colMoney},
+		{"Себестоимость", 15, colMoney}, {"Маржа", 12, colMoney}, {"Фудкост", 10, colPct}, {"Статус", 10, colText},
+		{"Техкарта", 10, colText}, {"Описание", 50, colText}}, rows, "Блюда_RMS", "RMS_dishes")
+}
+
+// ExportRecipes — GET /api/admin/export/recipes
+// One row per ingredient of every dish, with its cost in the portion.
+func (h *ExportHandler) ExportRecipes(c *gin.Context) {
+	rows, err := h.queryRows(c, `
+		SELECT d.name, c.name, i.name, r.quantity::float8, i.unit, i.price::float8, (r.quantity * i.price)::float8
+		FROM recipe_items r
+		JOIN dishes d ON d.id = r.dish_id
+		JOIN categories c ON c.id = d.category_id
+		JOIN ingredients i ON i.id = r.ingredient_id
+		ORDER BY c.name, d.name, i.name`)
+	if err != nil {
+		exportFailed(c)
+		return
+	}
+	h.one(c, "Техкарты", []column{{"Блюдо", 22, colText}, {"Категория", 14, colText}, {"Продукт", 26, colText},
+		{"На порцию", 11, colNumber}, {"Ед.", 6, colText}, {"Цена за ед.", 12, colMoney}, {"Стоимость в порции", 18, colMoney}},
+		rows, "Техкарты_RMS", "RMS_recipes")
+}
+
+// ExportCategories — GET /api/admin/export/categories
+func (h *ExportHandler) ExportCategories(c *gin.Context) {
+	rows, err := h.queryRows(c, `
+		SELECT c.id, c.name, count(d.id),
+		       count(d.id) FILTER (WHERE COALESCE(d.is_available, true)),
+		       COALESCE(round(avg(d.price)), 0)::float8
+		FROM categories c LEFT JOIN dishes d ON d.category_id = c.id
+		GROUP BY c.id ORDER BY c.name`)
+	if err != nil {
+		exportFailed(c)
+		return
+	}
+	h.one(c, "Категории", []column{{"ID", 6, colInt}, {"Категория", 20, colText}, {"Блюд", 8, colInt},
+		{"В меню", 9, colInt}, {"Средняя цена", 14, colMoney}}, rows, "Категории_RMS", "RMS_categories")
+}
+
+// ExportUsers — GET /api/admin/export/users
+func (h *ExportHandler) ExportUsers(c *gin.Context) {
+	rows, err := h.queryRows(c, `
+		SELECT u.id, u.name, u.email, u.role, COALESCE(u.created_at, now()),
+		       count(o.id) FILTER (WHERE o.status <> 'cancelled'),
+		       COALESCE(sum(o.total_price) FILTER (WHERE o.status <> 'cancelled'), 0)::float8,
+		       max(o.created_at)
+		FROM users u LEFT JOIN orders o ON o.user_id = u.id
+		GROUP BY u.id ORDER BY (u.role = 'customer'), 7 DESC, u.id`)
+	if err != nil {
+		exportFailed(c)
+		return
+	}
+	for _, r := range rows {
+		if role, ok := r[3].(string); ok && roleRu[role] != "" {
+			r[3] = roleRu[role]
+		}
+		if r[7] == nil {
+			r[7] = "—"
+		}
+	}
+	h.one(c, "Пользователи", []column{{"ID", 6, colInt}, {"Имя", 22, colText}, {"Email", 30, colText}, {"Роль", 15, colText},
+		{"Зарегистрирован", 17, colDate}, {"Заказов", 9, colInt}, {"Потратил", 14, colMoney}, {"Последний заказ", 17, colDate}},
+		rows, "Пользователи_RMS", "RMS_users")
+}
+
+// ExportMyOrders — GET /api/export/my-orders
+// A guest downloads the history of their own orders.
+func (h *ExportHandler) ExportMyOrders(c *gin.Context) {
+	userID, _ := currentUser(c)
+	orders, err := h.Orders.loadOrders(c.Request.Context(),
+		orderSelect+`WHERE o.user_id = $1 ORDER BY o.created_at DESC`, userID)
+	if err != nil {
+		exportFailed(c)
+		return
+	}
+	data := make([][]any, len(orders))
+	for i, o := range orders {
+		var dishes []string
+		for _, it := range o.Items {
+			dishes = append(dishes, fmt.Sprintf("%s × %d", it.Name, it.Quantity))
+		}
+		data[i] = []any{o.ID, o.CreatedAt, orderStatusRu[o.Status], strings.Join(dishes, ", "), o.PromoCode, o.Discount, o.TotalPrice}
+	}
+	h.one(c, "Мои заказы", []column{{"№", 8, colInt}, {"Дата", 17, colDate}, {"Статус", 15, colText}, {"Состав", 55, colText},
+		{"Промокод", 13, colText}, {"Скидка", 12, colMoney}, {"Итого", 13, colMoney}}, data, "Мои_заказы_RMS", "RMS_my_orders")
 }
